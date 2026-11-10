@@ -33,29 +33,30 @@ browser tests on pull requests and pushes to `main`. It does not deploy anything
 
 ## Try it
 
-The app opens with a working **cell → switch → lamp** circuit. The lamp's power is
-calculated immediately. Open **Try an example** for a blank canvas, two lamps in
-series, or two lamps in parallel.
+The app opens with a **blank canvas**. Open **Examples** for a cell, switch and
+bulb, two bulbs in series, or two bulbs in parallel.
 
-1. Drag a component from the library onto the grid, or click its library button.
+1. Drag a part from the list onto the grid, or click its button. Drop a part
+   onto an existing wire to split that wire and connect the part in line.
 2. Click a terminal, then another terminal to connect them. You can also drag
-   between terminals. Both ends of a cell and a lamp need connections.
-3. While drawing a wire, click empty space to place corners. Double-click to leave
-   a disconnected endpoint. Escape cancels the preview.
+   between terminals. Both ends of a cell and a bulb need connections.
+3. While drawing a wire, click empty space to add a bend. Double-click to leave
+   a disconnected end. Escape cancels the preview.
 4. Double-click a switch in 2D, click its physical body or label in 3D, or toggle
    its inspector control. The schematic and physical scene use the same state.
 5. Select a component to edit its values and see its simulated voltage, current,
    power, and lamp brightness.
 
-**Branches:** in wire mode, click an existing wire to create a connected junction
-and start or finish a branch. In select mode, double-click a wire to add a junction.
-A visible dot means an explicit connection. Plain wire crossings never connect.
+**Branches:** in the wire tool, click an existing wire to add a join and start or
+finish a branch. In the select tool, double-click a wire to add a join. A visible
+dot means an explicit connection. Plain wire crossings never connect.
 
-**Editing:** select a wire to expose its endpoint and corner handles. Drag an
-endpoint to reconnect it; drag a corner to reshape it. Moving or rotating a part
-reroutes its wires to the new terminal positions. Shift-click adds to selection;
-drag an empty area to select several components. Right-click a part or wire for
-selection actions. Copying a complete parallel circuit preserves its junctions.
+**Editing:** select a wire to show its ends, bends and segment handles. Drag an
+end to reconnect it; drag a bend or a segment to reshape it. Wires use rounded
+orthogonal routing. Moving or rotating a part keeps its wires attached to the
+new terminal positions. Shift-click adds to selection; drag an empty area to
+select several parts. Right-click a part or wire for selection actions. Copying
+a complete parallel circuit keeps its joins.
 
 **Camera:** orbit, zoom and pan the experiment with the mouse or touch controls.
 Reset and fit buttons restore a useful view. The camera stays above the tabletop.
@@ -99,7 +100,7 @@ own voltage reference; there is no implicit common ground between islands.
 | Component | Supported model |
 | --- | --- |
 | Cell / battery | Editable DC source, 0.1 Ω internal series resistance; defaults 1.5 V / 4.5 V. Supports series sources and multiple sources in a graph. |
-| Lamp | Constant R = rated V² / rated P. Defaults 1.5 V, 0.3 W → 7.5 Ω. Brightness is P / rated P, capped for rendering. Warns above 130% of rating. |
+| Bulb | Constant R = rated V² / rated P. Defaults 1.5 V, 0.3 W → 7.5 Ω. Brightness is P / rated P, capped for rendering. Warns above 130% of rating. |
 | Switch / push button | Open: branch omitted. Closed: 0.01 Ω. |
 | Fixed / variable resistor | Linear, editable resistance. Variable resistor also has a 10–1,000 Ω slider. |
 | LED | Forward voltage (default 2 V) plus 10 Ω dynamic resistance. Reverse/off conductance 1e−10 S. Brightness rises to 20 mA. External series resistor is required to limit current. Warns above 30 mA and for reverse polarity. |
@@ -160,7 +161,7 @@ representations, not calibrated hardware models.
 - No watermark is added.
 
 This is a small educational editor, bounded to **200 components and 600 wires**.
-Routing is a predictable orthogonal elbow router with manual corners. It does
+Routing is a predictable orthogonal elbow router with rounded corners and manual bends. It does
 not attempt professional CAD obstacle routing. The 3D scene uses a deterministic
 layout, keeps existing equipment stationary during unrelated edits, separates
 nearby physical equipment, and attaches flexible tube cables to the same terminal
@@ -182,7 +183,7 @@ src/
   scene/Experiment.tsx  Canvas, flexible cables, lighting, orbit controls, audio
   scene/Models.tsx      Reusable procedural classroom equipment
   scene/Wood.tsx        Locally generated wooden-table texture
-  ui/                   Inspector, accessible modal, React Bits entrance motion
+  ui/                   Properties panel, accessible modal, React Bits entrance motion
   App.tsx               Workspace, project actions, settings and help
   styles.css            Responsive themes and interface styling
 ```
@@ -197,7 +198,7 @@ font, model or texture download is required at runtime.
 
 Tests cover nodal analysis, current/voltage/power references, parallel and series
 branches, open/closed switches, LEDs and polarity, meters, shorts, invalid models,
-explicit junction connectivity, grid snapping, editing and history, branch
+explicit join connectivity, drop-on-wire splicing, grid snapping, editing and history, branch
 copy/paste, physical-layout stability, IndexedDB, project validation and clean SVG.
 Playwright exercises actual placement, dragging, terminal wiring, physical and
 schematic switching, keyboard input, junctions, local recovery, downloads, themes

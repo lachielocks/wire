@@ -57,11 +57,11 @@ export function Inspector({
     <aside className="inspector">
       <div className="panel-heading">
         <span>
-          <Settings2 size={15} /> Inspector
+          <Settings2 size={15} /> Properties
         </span>
         <button
           className="icon-button"
-          aria-label="Close inspector"
+          aria-label="Close properties"
           onClick={onClose}
         >
           <X size={15} />
@@ -80,7 +80,7 @@ export function Inspector({
             <span>{library.find((p) => p.kind === c.kind)?.group}</span>
           </div>
           <h2>{library.find((p) => p.kind === c.kind)?.name}</h2>
-          <p className="muted small">A small part of a bright idea.</p>
+          <p className="muted small">Edit this part and see live readings.</p>
           <div className="inspector-fields">
             <label className="field">
               <span>Label</span>
@@ -245,7 +245,7 @@ export function Inspector({
           )}
           <p className="model-note">
             {c.kind === "lamp"
-              ? "A simplified lamp: constant resistance from its rated voltage and power."
+              ? "A simple bulb model: constant resistance from its rated voltage and power."
               : c.kind === "led"
                 ? "Simplified LED: forward-voltage drop + 10 Ω dynamic resistance. Add an external current-limiting resistor."
                 : c.kind === "motor"
@@ -257,7 +257,7 @@ export function Inspector({
                       : c.kind === "ammeter"
                         ? "0.01 Ω internal resistance. Insert into the branch you want to measure."
                         : c.kind === "cell" || c.kind === "battery"
-                          ? "DC voltage source with 0.1 Ω internal resistance. The long schematic line is positive."
+                          ? "DC voltage source with 0.1 Ω internal resistance. The long line is positive."
                           : "Values and connections update the simulation immediately."}
           </p>
           <button className="danger-text" onClick={s.remove}>
@@ -268,11 +268,11 @@ export function Inspector({
         </AnimatedContent>
       ) : wire || j ? (
         <div className="inspector-content">
-          <h2>{wire ? "Connecting wire" : "Junction"}</h2>
+          <h2>{wire ? "Wire" : "Join"}</h2>
           <p className="muted small">
             {wire
-              ? "Drag an endpoint handle to reconnect. Drag a corner to reshape the wire. Double-click a wire to add a junction."
-              : "Only wires attached to this dot share an electrical connection. A plain crossing does not connect."}
+              ? "Drag an end to reconnect it. Drag a bend or a segment to reshape the wire. Double-click to add a join."
+              : "Only wires attached to this dot are connected. Wires that cross without a dot stay separate."}
           </p>
           <button className="danger-text" onClick={s.remove}>
             <Trash2 size={14} /> Delete selection
@@ -283,26 +283,23 @@ export function Inspector({
           <div className="idle-icon">
             <MouseIcon />
           </div>
-          <h2>A closer look.</h2>
-          <p>
-            Select a component to adjust its properties and see live
-            measurements.
-          </p>
+          <h2>No part selected</h2>
+          <p>Select a part to edit its values and see live measurements.</p>
           <div className="little-lesson">
             <span className="eyebrow">
-              <Lightbulb size={14} /> A LIGHTBULB MOMENT
+              <Lightbulb size={14} /> Tip
             </span>
             <h3>One path or two?</h3>
             <p>
-              In series, the same current flows through every lamp. Add a
-              parallel branch and give it another way around.
+              In series, the same current flows through every bulb. Add a
+              parallel branch to give current another path.
             </p>
             <button onClick={onHelp}>
-              Explore the basics <ArrowUpRight size={14} />
+              How it works <ArrowUpRight size={14} />
             </button>
           </div>
           <div className="quick-tips">
-            <h3>Make yourself at home</h3>
+            <h3>Shortcuts</h3>
             <p>
               <kbd>W</kbd> Connect with a wire
             </p>

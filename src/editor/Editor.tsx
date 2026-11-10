@@ -15,7 +15,6 @@ import {
   endpoint,
   endpointKey,
   format,
-  pathD,
   terminal,
   wirePoints,
   type Endpoint,
@@ -23,6 +22,14 @@ import {
   type Simulation,
   type Wire,
 } from "../core/types";
+import {
+  hitWire,
+  midpoint,
+  moveWireSegment,
+  roundedPathD,
+  simplifyPoints,
+  wireCarriesCurrent,
+} from "../core/wires";
 import { Symbol } from "./Symbol";
 type Draft = { from: Endpoint; corners: Point[]; replace?: string };
 export function Editor({ simulation }: { simulation: Simulation }) {
@@ -35,6 +42,7 @@ export function Editor({ simulation }: { simulation: Simulation }) {
     [cursor, setCursor] = useState<Point>({ x: 0, y: 0 });
   const [box, setBox] = useState<{ from: Point; to: Point } | null>(null);
   const [context, setContext] = useState<Point | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const openContext = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -46,13 +54,14 @@ export function Editor({ simulation }: { simulation: Simulation }) {
     });
   };
   const gesture = useRef<null | {
-    type: "parts" | "pan" | "box" | "corner";
+    type: "parts" | "pan" | "box" | "corner" | "segment";
     start: Point;
     origins?: { id: string; x: number; y: number }[];
     camera?: typeof camera;
     wireId?: string;
     index?: number;
     checkpointed?: boolean;
+    segmentPoints?: Point[];
   }>(null);
   const wireDown = useRef<Point | null>(null);
   useEffect(() => {
@@ -175,7 +184,8 @@ export function Editor({ simulation }: { simulation: Simulation }) {
   };
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const p = point(e);
-    setCursor(snappedPoint(p));
+    const snapped = draft ? nearestTerminal(p) : null;
+    setCursor(snapped ? endpoint(s.project, snapped) : snappedPoint(p));
     const g = gesture.current;
     if (!g) return;
     if (g.type === "pan") {
@@ -227,6 +237,20 @@ export function Editor({ simulation }: { simulation: Simulation }) {
       s.change((proj) => {
         const w = proj.wires.find((w) => w.id === g.wireId);
         if (w) w.corners[g.index!] = snappedPoint(p);
+      }, false);
+    }
+    if (g.type === "segment" && g.segmentPoints) {
+      const to = snappedPoint(p);
+      if (!g.checkpointed) {
+        s.checkpoint();
+        g.checkpointed = true;
+      }
+      const moved = simplifyPoints(
+        moveWireSegment(g.segmentPoints, g.index!, to),
+      );
+      s.change((proj) => {
+        const w = proj.wires.find((w) => w.id === g.wireId);
+        if (w) w.corners = moved.slice(1, -1);
       }, false);
     }
   };
@@ -326,9 +350,12 @@ export function Editor({ simulation }: { simulation: Simulation }) {
         onDragOver={(e) => {
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
+          setDropTarget(hitWire(s.project, point(e))?.wire.id ?? null);
         }}
+        onDragLeave={() => setDropTarget(null)}
         onDrop={(e) => {
           e.preventDefault();
+          setDropTarget(null);
           const kind = e.dataTransfer.getData("wire/component");
           if (
             kind &&
@@ -347,7 +374,9 @@ export function Editor({ simulation }: { simulation: Simulation }) {
               "voltmeter",
             ].includes(kind)
           )
-            s.add(kind as Parameters<typeof s.add>[0], point(e));
+            s.add(kind as Parameters<typeof s.add>[0], point(e), {
+              splice: true,
+            });
         }}
         onPointerDown={(e) => {
           setContext(null);
@@ -363,7 +392,9 @@ export function Editor({ simulation }: { simulation: Simulation }) {
           if (e.button !== 0) return;
           const p = snappedPoint(point(e));
           if (draft) {
-            setDraft({ ...draft, corners: [...draft.corners, p] });
+            const ep = nearestTerminal(point(e));
+            if (ep) finish(ep);
+            else setDraft({ ...draft, corners: [...draft.corners, p] });
             return;
           }
           if (s.tool === "wire") {
@@ -405,90 +436,139 @@ export function Editor({ simulation }: { simulation: Simulation }) {
         <g
           transform={`translate(${camera.x} ${camera.y}) scale(${camera.scale})`}
         >
-          {s.project.wires.map((w) => (
-            <g
-              key={w.id}
-              className={`wire ${s.selected.includes(w.id) ? "selected" : ""} ${draft?.replace === w.id ? "reconnecting" : ""}`}
-              onPointerDown={(e) => clickWire(e, w)}
-              onContextMenu={(e) => openContext(e, w.id)}
-              onDoubleClick={(e) => {
-                e.stopPropagation();
-                clickWire(e, w, true);
-              }}
-            >
-              <path
-                d={pathD(wirePoints(s.project, w))}
-                stroke="transparent"
-                strokeWidth="16"
-                fill="none"
-              />
-              <path
-                d={pathD(wirePoints(s.project, w))}
-                className="wire-line"
-                fill="none"
-                strokeWidth="2.5"
-                strokeLinejoin="round"
-              />
-              {[w.from, w.to].map((ep, i) =>
-                !("componentId" in ep) && !("junctionId" in ep) ? (
-                  <circle
-                    key={i}
-                    cx={ep.x}
-                    cy={ep.y}
-                    r="4"
-                    className="loose-end"
+          {s.project.wires.map((w) => {
+            const points = wirePoints(s.project, w),
+              d = roundedPathD(points),
+              live =
+                s.project.settings.effects &&
+                wireCarriesCurrent(s.project, w, simulation);
+            return (
+              <g
+                key={w.id}
+                className={`wire ${s.selected.includes(w.id) ? "selected" : ""} ${draft?.replace === w.id ? "reconnecting" : ""} ${dropTarget === w.id ? "drop-target" : ""} ${live ? "live" : ""}`}
+                onPointerDown={(e) => clickWire(e, w)}
+                onContextMenu={(e) => openContext(e, w.id)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  clickWire(e, w, true);
+                }}
+              >
+                <path d={d} stroke="transparent" strokeWidth="16" fill="none" />
+                <path
+                  d={d}
+                  className="wire-line"
+                  fill="none"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                {live && (
+                  <path
+                    d={d}
+                    className="wire-flow"
+                    fill="none"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
-                ) : null,
-              )}
-              {s.selected.includes(w.id) && (
-                <>
-                  {[w.from, w.to].map((ep, i) => {
-                    const p = endpoint(s.project, ep);
-                    return (
-                      <circle
-                        key={i}
-                        cx={p.x}
-                        cy={p.y}
-                        r="7"
+                )}
+                {[w.from, w.to].map((ep, i) =>
+                  !("componentId" in ep) && !("junctionId" in ep) ? (
+                    <circle
+                      key={i}
+                      cx={ep.x}
+                      cy={ep.y}
+                      r="4"
+                      className="loose-end"
+                    />
+                  ) : null,
+                )}
+                {s.selected.includes(w.id) && (
+                  <>
+                    {[w.from, w.to].map((ep, i) => {
+                      const p = endpoint(s.project, ep);
+                      return (
+                        <circle
+                          key={i}
+                          cx={p.x}
+                          cy={p.y}
+                          r="7"
+                          className="wire-handle"
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            setDraft({
+                              from: i ? w.from : w.to,
+                              corners: i ? w.corners : [...w.corners].reverse(),
+                              replace: w.id,
+                            });
+                            setCursor(p);
+                            wireDown.current = p;
+                            svg.current!.setPointerCapture(e.pointerId);
+                          }}
+                        />
+                      );
+                    })}
+                    {w.corners.map((p, i) => (
+                      <rect
+                        key={`c${i}`}
+                        x={p.x - 5}
+                        y={p.y - 5}
+                        width="10"
+                        height="10"
                         className="wire-handle"
                         onPointerDown={(e) => {
                           e.stopPropagation();
-                          setDraft({
-                            from: i ? w.from : w.to,
-                            corners: i ? w.corners : [...w.corners].reverse(),
-                            replace: w.id,
-                          });
-                          setCursor(p);
-                          wireDown.current = p;
+                          gesture.current = {
+                            type: "corner",
+                            start: point(e),
+                            wireId: w.id,
+                            index: i,
+                          };
                           svg.current!.setPointerCapture(e.pointerId);
                         }}
                       />
-                    );
-                  })}
-                  {w.corners.map((p, i) => (
-                    <rect
-                      key={i}
-                      x={p.x - 5}
-                      y={p.y - 5}
-                      width="10"
-                      height="10"
-                      className="wire-handle"
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        gesture.current = {
-                          type: "corner",
-                          start: point(e),
-                          wireId: w.id,
-                          index: i,
-                        };
-                        svg.current!.setPointerCapture(e.pointerId);
-                      }}
+                    ))}
+                    {points.slice(0, -1).map((a, i) => {
+                      const b = points[i + 1],
+                        mid = midpoint(a, b);
+                      if (Math.hypot(b.x - a.x, b.y - a.y) < 24) return null;
+                      return (
+                        <circle
+                          key={`s${i}`}
+                          cx={mid.x}
+                          cy={mid.y}
+                          r="4.5"
+                          className="wire-segment-handle"
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            gesture.current = {
+                              type: "segment",
+                              start: point(e),
+                              wireId: w.id,
+                              index: i,
+                              segmentPoints: points,
+                            };
+                            svg.current!.setPointerCapture(e.pointerId);
+                          }}
+                        />
+                      );
+                    })}
+                  </>
+                )}
+                {[w.from, w.to].map((ep, i) =>
+                  "componentId" in ep || "junctionId" in ep ? (
+                    <circle
+                      key={`n${i}`}
+                      cx={endpoint(s.project, ep).x}
+                      cy={endpoint(s.project, ep).y}
+                      r="3.25"
+                      className="wire-node"
                     />
-                  ))}
-                </>
-              )}
-            </g>
-          ))}
+                  ) : null,
+                )}
+              </g>
+            );
+          })}
           {s.project.junctions.map((j) => (
             <g
               key={j.id}
@@ -673,7 +753,7 @@ export function Editor({ simulation }: { simulation: Simulation }) {
           })}
           {draft && (
             <path
-              d={pathD(
+              d={roundedPathD(
                 wirePoints(s.project, {
                   id: "preview",
                   from: draft.from,
@@ -683,7 +763,9 @@ export function Editor({ simulation }: { simulation: Simulation }) {
               )}
               className="wire-preview"
               fill="none"
-              strokeWidth="2.5"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             />
           )}
           {box && (
@@ -702,12 +784,11 @@ export function Editor({ simulation }: { simulation: Simulation }) {
       </svg>
       {!s.project.components.length && (
         <div className="empty-grid">
-          <span className="empty-spark">✦</span>
-          <h2>Every idea starts with a spark.</h2>
+          <h2>The canvas is empty</h2>
           <p>
-            Drag a cell onto the grid.
+            Drag a part from the list onto the grid.
             <br />
-            Add a lamp, then connect their terminals.
+            Then click one terminal and click the next to connect them.
           </p>
         </div>
       )}
@@ -793,10 +874,10 @@ export function Editor({ simulation }: { simulation: Simulation }) {
       </div>
       <div className="canvas-hint">
         {draft
-          ? "Click a terminal to connect · click for corners · double-click to end · Esc to cancel"
+          ? "Click a terminal to connect · click to add a bend · double-click to stop · Esc to cancel"
           : s.tool === "wire"
-            ? "Connect terminals · click a wire to create a junction"
-            : "Drag to move · double-click a switch to toggle"}
+            ? "Click terminals to connect them · click a wire to add a join"
+            : "Drag to move · drop a part onto a wire to add it in the line"}
       </div>
     </div>
   );

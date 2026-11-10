@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { endpoint, pathD, wirePoints, type Project } from "./types";
+import { endpoint, wirePoints, type Project } from "./types";
+import { roundedPathD } from "./wires";
 import { Symbol } from "../editor/Symbol";
 export function svgSource(p: Project, transparent = false, title = false) {
   const points = [
@@ -45,10 +46,11 @@ export function svgSource(p: Project, transparent = false, title = false) {
       {p.wires.map((w) => (
         <path
           key={w.id}
-          d={pathD(wirePoints(p, w))}
+          d={roundedPathD(wirePoints(p, w))}
           fill="none"
           stroke="#293b32"
-          strokeWidth="2.5"
+          strokeWidth="3"
+          strokeLinecap="round"
           strokeLinejoin="round"
         />
       ))}

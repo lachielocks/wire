@@ -260,7 +260,7 @@ export default function App() {
         );
       else if (type === "3d") await exportScene(s.project);
       else await exportDiagram(s.project, type, titleOnExport);
-      toast("Export ready. A little idea, out in the world.");
+      toast("Export ready.");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Export failed.");
     } finally {
@@ -381,24 +381,22 @@ export default function App() {
       </header>
       <div className="workspace-heading">
         <div>
-          <div className="eyebrow">
-            <span className="tiny-spark">✦</span> A LITTLE SPACE TO EXPERIMENT
-          </div>
+          <div className="eyebrow">Circuit builder</div>
           <h1>
-            Your next bright idea<span>.</span>
+            Build a circuit<span>.</span>
           </h1>
           <p>Draw it. Connect it. See it work.</p>
         </div>
         <div className="heading-right">
           <span className="local-badge">
             <span />
-            All yours. Saved locally.
+            Saved on this device
           </span>
           <button
             className="secondary examples-button"
             onClick={() => setDialog("new")}
           >
-            <BookOpen size={15} /> Try an example <ChevronDown size={13} />
+            <BookOpen size={15} /> Examples <ChevronDown size={13} />
           </button>
         </div>
       </div>
@@ -468,9 +466,9 @@ export default function App() {
           <div className="library-footer">
             <span className="mini-logo">↳</span>
             <span>
-              A few simple parts.
+              Drag a part onto the canvas.
               <br />
-              <strong>Endless possibilities.</strong>
+              <strong>Drop it on a wire to add it in line.</strong>
             </span>
           </div>
         </aside>
@@ -485,7 +483,7 @@ export default function App() {
                 <Grid2X2 size={16} />
               </button>
               <span className="workspace-square" />
-              <span>Your workspace</span>
+              <span>Canvas</span>
             </div>
             <div
               className="view-control"
@@ -527,8 +525,8 @@ export default function App() {
               </button>
               <button
                 className="icon-button"
-                title={inspector ? "Hide inspector" : "Show inspector"}
-                aria-label="Toggle inspector"
+                title={inspector ? "Hide properties" : "Show properties"}
+                aria-label="Toggle properties"
                 onClick={() => setInspector((v) => !v)}
               >
                 {inspector ? (
@@ -543,7 +541,7 @@ export default function App() {
             <div className="schematic-pane">
               <div className="viewport-heading">
                 <span>
-                  <Pencil size={12} /> SCHEMATIC
+                  <Pencil size={12} /> Circuit
                 </span>
                 <small>2D</small>
               </div>
@@ -554,7 +552,7 @@ export default function App() {
                 fallback={
                   <div className="scene-loading">
                     <LoaderCircle className="spin" size={20} />
-                    Setting the workbench…
+                    Loading 3D…
                   </div>
                 }
               >
@@ -589,10 +587,10 @@ export default function App() {
               <span className="status-description">
                 {simulation.status === "complete"
                   ? simulation.sourceCurrent > 1e-6
-                    ? "Let there be light."
-                    : "A complete path, with very little current."
+                    ? "Current is flowing."
+                    : "The path is complete, but almost no current is flowing."
                   : simulation.status === "open"
-                    ? "A connection away from something bright."
+                    ? "The circuit is not complete yet."
                     : simulation.message}
               </span>
             </div>
@@ -625,7 +623,7 @@ export default function App() {
               <div className="status-popover">
                 <h3>
                   {simulation.status === "complete"
-                    ? "A complete circuit"
+                    ? "The circuit is complete"
                     : "What’s happening?"}
                 </h3>
                 <p>{simulation.message}</p>
@@ -653,9 +651,7 @@ export default function App() {
         )}
       </main>
       <footer className="app-footer">
-        <span>
-          MADE FOR CURIOUS MINDS <span className="footer-spark">✦</span>
-        </span>
+        <span>Made for Year 9 science</span>
         <span>
           Wire by{" "}
           <a
@@ -706,9 +702,9 @@ export default function App() {
         }}
       />
       {dialog === "new" && (
-        <Modal title="Start something bright." onClose={() => setDialog(null)}>
+        <Modal title="New circuit" onClose={() => setDialog(null)}>
           <p className="modal-intro">
-            A clean slate or a little inspiration. You choose.
+            Start with a blank canvas, or open a ready-made circuit.
           </p>
           {s.dirty && (
             <div className="inline-note">
@@ -723,22 +719,22 @@ export default function App() {
             {[
               {
                 name: "Blank canvas",
-                desc: "Make your own connections.",
+                desc: "Start empty and build your own.",
                 type: "blank",
               },
               {
-                name: "A little light",
-                desc: "One cell, a switch, a lamp.",
+                name: "Cell, switch and bulb",
+                desc: "One cell, a switch and a bulb.",
                 type: "simple",
               },
               {
-                name: "Two lamps in series",
-                desc: "One path. Share the energy.",
+                name: "Two bulbs in series",
+                desc: "One path through both bulbs.",
                 type: "series",
               },
               {
-                name: "Two paths, one circuit",
-                desc: "A parallel connection.",
+                name: "Two bulbs in parallel",
+                desc: "Two paths, side by side.",
                 type: "parallel",
               },
             ].map((p, i) => (
@@ -762,7 +758,7 @@ export default function App() {
         </Modal>
       )}
       {dialog === "open" && (
-        <Modal title="Your little experiments." onClose={() => setDialog(null)}>
+        <Modal title="Open a circuit" onClose={() => setDialog(null)}>
           <p className="modal-intro">Saved in this browser, on this device.</p>
           {s.dirty && (
             <div className="inline-note">
@@ -833,8 +829,8 @@ export default function App() {
             ) : (
               <div className="empty-projects">
                 <FolderOpen size={30} />
-                <h3>No saved experiments yet.</h3>
-                <p>Save a circuit and you’ll find it here.</p>
+                <h3>No saved circuits yet</h3>
+                <p>Save a circuit and it will show up here.</p>
               </div>
             )}
           </div>
@@ -847,7 +843,7 @@ export default function App() {
         </Modal>
       )}
       {dialog === "saveas" && (
-        <Modal title="Give your idea a name." onClose={() => setDialog(null)}>
+        <Modal title="Name this circuit" onClose={() => setDialog(null)}>
           <label className="field">
             <span>Project name</span>
             <input
@@ -907,28 +903,28 @@ export default function App() {
         </Modal>
       )}
       {dialog === "export" && (
-        <Modal title="Take your idea with you." onClose={() => setDialog(null)}>
+        <Modal title="Export" onClose={() => setDialog(null)}>
           <p className="modal-intro">
-            Crisp diagrams for your notes. A photo from your workbench.
+            Save a circuit diagram, a 3D photo, or a project file.
           </p>
           <div className="export-options">
             {[
               {
                 type: "png",
-                title: "Schematic · PNG",
-                desc: "High-resolution image, ready for assignments.",
+                title: "Circuit · PNG",
+                desc: "A high-resolution picture of the diagram.",
                 icon: Download,
               },
               {
                 type: "svg",
-                title: "Schematic · SVG",
-                desc: "A vector diagram. Sharp at any size.",
+                title: "Circuit · SVG",
+                desc: "A vector diagram, sharp at any size.",
                 icon: Pencil,
               },
               {
                 type: "3d",
-                title: "Experiment · PNG",
-                desc: "Capture your current 3D camera angle.",
+                title: "3D view · PNG",
+                desc: "A photo of the current 3D view.",
                 icon: Box,
               },
               {
@@ -979,7 +975,7 @@ export default function App() {
         </Modal>
       )}
       {dialog === "settings" && (
-        <Modal title="Make yourself at home." onClose={() => setDialog(null)}>
+        <Modal title="Settings" onClose={() => setDialog(null)}>
           <div className="settings-list">
             <label className="field">
               <span>Appearance</span>
@@ -1001,7 +997,7 @@ export default function App() {
               {
                 key: "grid",
                 name: "Dot grid",
-                desc: "A little structure for your ideas.",
+                desc: "Show dots on the canvas.",
               },
               {
                 key: "snap",
@@ -1044,43 +1040,43 @@ export default function App() {
         </Modal>
       )}
       {dialog === "help" && (
-        <Modal
-          title="A little help. A lot to discover."
-          wide
-          onClose={() => setDialog(null)}
-        >
+        <Modal title="Help" wide onClose={() => setDialog(null)}>
           <div className="help-columns">
             <div>
-              <h3>Make your first connection</h3>
+              <h3>Make your first circuit</h3>
               <ol>
                 <li>
-                  Drag a cell and a lamp onto the grid, or click them in the
-                  component library.
+                  Drag a cell and a bulb onto the canvas, or click them in the
+                  parts list.
                 </li>
                 <li>
-                  Click a terminal, then click the next terminal. Click empty
-                  space to add corners. Double-click to leave a loose end.
+                  Click one terminal, then click the next. Click empty space to
+                  add a bend. Double-click to leave a loose end.
                 </li>
                 <li>
-                  Connect both sides to make a complete circuit. The lamp
-                  responds to the calculated power.
+                  Connect both sides to complete the circuit. The bulb lights up
+                  when current flows.
                 </li>
                 <li>
                   Add a switch. Double-click it in 2D, click it in 3D, or use
-                  its inspector to open and close the circuit.
+                  Properties to open and close it.
+                </li>
+                <li>
+                  Drop a part onto an existing wire to split that wire and
+                  connect the part in line.
                 </li>
               </ol>
-              <h3>Branches, without surprises</h3>
+              <h3>Joins and branches</h3>
               <p>
-                In wire mode, click a wire to add a connected junction.
-                Double-click a wire in select mode to create a junction dot.
-                Crossings without a dot stay separate. Drag endpoint handles to
-                reconnect a selected wire.
+                In the wire tool, click a wire to add a join and start a branch.
+                Double-click a wire with the select tool to add a join dot.
+                Wires that cross without a dot stay separate. Select a wire to
+                drag its ends, bends, or segments.
               </p>
-              <h3>Simple models, real calculations</h3>
+              <h3>How the numbers work</h3>
               <p>
                 Wire uses DC modified nodal analysis. Sources include 0.1 Ω
-                internal resistance. Lamps have constant resistance R = V²/P;
+                internal resistance. Bulbs have constant resistance R = V²/P;
                 brightness follows P/P-rated. Closed switches and ammeters are
                 0.01 Ω. Voltmeters are 1 GΩ.
               </p>
@@ -1093,7 +1089,7 @@ export default function App() {
               </p>
             </div>
             <div>
-              <h3>Keep your hands on the keyboard</h3>
+              <h3>Keyboard shortcuts</h3>
               <div className="shortcuts">
                 {[
                   ["V", "Select tool"],
@@ -1123,7 +1119,7 @@ export default function App() {
                 several components. Tab to schematic components and press Enter
                 on a switch.
               </div>
-              <h3>A sandbox, with limits</h3>
+              <h3>Limits</h3>
               <p>
                 Up to 200 components and 600 wires per project. Values are
                 simplified educational models, not predictions for building

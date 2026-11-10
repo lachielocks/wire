@@ -6,7 +6,7 @@ describe("schematic export", () => {
     const p = example("parallel"),
       svg = svgSource(p);
     expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
-    expect(svg).toContain("Lamp 2");
+    expect(svg).toContain("Bulb 2");
     expect(svg).toContain('stroke="#293b32"');
     expect(svg).not.toContain("part-selection");
     expect(svg).not.toContain("terminal");

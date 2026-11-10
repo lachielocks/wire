@@ -1,6 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 async function boot(page: Page) {
   await page.goto("/");
+  await page.getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("button", { name: /Cell, switch and bulb/ }).click();
   await expect(page.getByTestId("simulation-status")).toHaveText(
     "Circuit complete",
   );
@@ -92,7 +94,7 @@ test("builds a functional cell and lamp circuit from a blank project", async ({
   await boot(page);
   await blank(page);
   await page.getByRole("button", { name: "Add Cell", exact: true }).click();
-  await page.getByRole("button", { name: "Add Lamp", exact: true }).click();
+  await page.getByRole("button", { name: "Add Bulb", exact: true }).click();
   const cell = await id(page, "cell"),
     lamp = await id(page, "lamp");
   await connect(page, `${cell}:0`, `${lamp}:0`);
@@ -145,7 +147,7 @@ test("saves to IndexedDB, recovers after reload, and opens a saved project", asy
   );
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await page
-    .getByRole("button", { name: /A little light.*3 components/ })
+    .getByRole("button", { name: /Cell, switch and bulb.*3 components/ })
     .click();
   await expect(page.getByTestId("simulation-status")).toHaveText(
     "Open circuit",
@@ -159,9 +161,9 @@ test("exports actual SVG, PNG, 3D screenshot and project files", async ({
   await expectRenderedExperiment(page);
   await page.getByRole("button", { name: "Export", exact: true }).click();
   for (const [name, suffix] of [
-    ["Schematic · SVG", ".svg"],
-    ["Schematic · PNG", ".png"],
-    ["Experiment · PNG", "-3D.png"],
+    ["Circuit · SVG", ".svg"],
+    ["Circuit · PNG", ".png"],
+    ["3D view · PNG", "-3D.png"],
     ["Wire project · JSON", ".wire.json"],
   ]) {
     const download = page.waitForEvent("download");
@@ -179,13 +181,13 @@ test("series and parallel examples use the solver and survive project export/imp
   page,
 }) => {
   await boot(page);
-  await page.getByRole("button", { name: "Try an example" }).click();
-  await page.getByRole("button", { name: /Two lamps in series/ }).click();
+  await page.getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("button", { name: /Two bulbs in series/ }).click();
   await expect(page.getByTestId("part-lamp")).toHaveCount(2);
   await page.getByTestId("part-lamp").first().click();
   await expect(page.getByTestId("reading-current")).toHaveText("99.3 mA");
-  await page.getByRole("button", { name: "Try an example" }).click();
-  await page.getByRole("button", { name: /Two paths, one circuit/ }).click();
+  await page.getByRole("button", { name: "Examples" }).click();
+  await page.getByRole("button", { name: /Two bulbs in parallel/ }).click();
   await page.getByTestId("part-lamp").first().click();
   await expect(page.getByTestId("reading-current")).toHaveText("194.3 mA");
 });
@@ -216,12 +218,12 @@ test("supports a narrow screen without horizontal overflow", async ({
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await boot(page);
-  await page.getByRole("button", { name: "Toggle inspector" }).click();
+  await page.getByRole("button", { name: "Toggle properties" }).click();
   await page.getByRole("button", { name: "Show components" }).click();
   await page.getByRole("button", { name: "Add Resistor", exact: true }).click();
   await expect(page.getByTestId("part-resistor")).toHaveCount(1);
   await page
-    .getByRole("button", { name: "Close inspector", exact: true })
+    .getByRole("button", { name: "Close properties", exact: true })
     .click();
   await page.getByRole("button", { name: "3D view", exact: true }).click();
   await expect(page.getByTestId("experiment-canvas")).toBeVisible();
@@ -303,14 +305,14 @@ test("connects circuit terminals using only keyboard-accessible controls", async
   await boot(page);
   await blank(page);
   await page.getByRole("button", { name: "Add Cell", exact: true }).click();
-  await page.getByRole("button", { name: "Add Lamp", exact: true }).click();
+  await page.getByRole("button", { name: "Add Bulb", exact: true }).click();
   for (const t of ["one", "two"]) {
     await page
       .getByRole("button", { name: `Cell terminal ${t}`, exact: true })
       .focus();
     await page.keyboard.press("Enter");
     await page
-      .getByRole("button", { name: `Lamp terminal ${t}`, exact: true })
+      .getByRole("button", { name: `Bulb terminal ${t}`, exact: true })
       .focus();
     await page.keyboard.press("Enter");
   }

@@ -87,7 +87,7 @@ export function solve(c: Circuit): Simulation {
   if (!c.components.length)
     return empty(
       "open",
-      "Add a cell and a lamp. A little curiosity goes a long way.",
+      "Add a cell and a bulb, then connect them with wires.",
     );
   if (c.components.length > 200 || c.wires.length > 600)
     return empty(
@@ -298,7 +298,7 @@ export function solve(c: Circuit): Simulation {
           ? "Add a cell or battery to supply electrical energy."
           : status === "complete"
             ? sourceCurrent > 1e-6
-              ? "A complete path. Electrical energy is making things happen."
+              ? "The circuit is complete and current is flowing."
               : "The path is complete, but the sources balance or the current is very small."
             : "There isn’t a complete path for current. Check your wires and switches.",
       readings,

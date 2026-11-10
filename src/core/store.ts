@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import {
-  example,
   makePart,
   newProject,
   snap,
@@ -15,6 +14,7 @@ import {
   type View,
   type Wire,
 } from "./types";
+import { hitWire, spliceComponentIntoWire } from "./wires";
 type Snapshot = Pick<Project, "components" | "wires" | "junctions" | "name">;
 const snapshot = (p: Project): Snapshot =>
   structuredClone({
@@ -38,7 +38,7 @@ type State = {
   change: (fn: (p: Project) => void, history?: boolean) => void;
   select: (ids: string[]) => void;
   setTool: (tool: State["tool"]) => void;
-  add: (kind: Kind, point: Point) => void;
+  add: (kind: Kind, point: Point, opts?: { splice?: boolean }) => void;
   update: (id: string, patch: Partial<Part>, history?: boolean) => void;
   remove: () => void;
   rotate: () => void;
@@ -56,7 +56,7 @@ type State = {
   toast: (notice: string) => void;
 };
 export const useStore = create<State>((set, get) => ({
-  project: example(),
+  project: newProject(),
   selected: [],
   past: [],
   future: [],
@@ -82,15 +82,21 @@ export const useStore = create<State>((set, get) => ({
   },
   select: (selected) => set({ selected }),
   setTool: (tool) => set({ tool }),
-  add: (kind, point) => {
+  add: (kind, point, opts) => {
     if (get().project.components.length >= 200) {
       get().toast("This project has reached the 200-component limit.");
       return;
     }
     const part = makePart(kind, point.x, point.y);
     if (!get().project.settings.snap) Object.assign(part, point);
+    const hit = opts?.splice ? hitWire(get().project, point) : null;
+    if (hit && get().project.wires.length >= 600) {
+      get().toast("This project has reached the 600-wire limit.");
+      return;
+    }
     get().change((p) => {
       p.components.push(part);
+      if (hit) spliceComponentIntoWire(p, hit.wire.id, hit.point, part);
     });
     set({ selected: [part.id], tool: "select" });
   },

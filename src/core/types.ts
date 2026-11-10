@@ -82,14 +82,19 @@ export const library: {
 }[] = [
   { kind: "cell", name: "Cell", group: "Power", detail: "1.5 V" },
   { kind: "battery", name: "Battery", group: "Power", detail: "4.5 V" },
-  { kind: "lamp", name: "Lamp", group: "Outputs", detail: "A little light" },
-  { kind: "led", name: "LED", group: "Outputs", detail: "Mind the polarity" },
-  { kind: "motor", name: "Motor", group: "Outputs", detail: "Make it move" },
+  { kind: "lamp", name: "Bulb", group: "Outputs", detail: "1.5 V, 0.3 W" },
+  { kind: "led", name: "LED", group: "Outputs", detail: "Check + and −" },
+  {
+    kind: "motor",
+    name: "Motor",
+    group: "Outputs",
+    detail: "Turns with current",
+  },
   {
     kind: "buzzer",
     name: "Buzzer",
     group: "Outputs",
-    detail: "Make some noise",
+    detail: "Makes a sound",
   },
   {
     kind: "switch",
@@ -109,18 +114,18 @@ export const library: {
     group: "Controls",
     detail: "10–1,000 Ω",
   },
-  { kind: "resistor", name: "Resistor", group: "Components", detail: "100 Ω" },
+  { kind: "resistor", name: "Resistor", group: "Parts", detail: "100 Ω" },
   {
     kind: "ammeter",
     name: "Ammeter",
-    group: "Measurements",
-    detail: "Measure current",
+    group: "Meters",
+    detail: "Measures current",
   },
   {
     kind: "voltmeter",
     name: "Voltmeter",
-    group: "Measurements",
-    detail: "Measure voltage",
+    group: "Meters",
+    detail: "Measures voltage",
   },
 ];
 export function makePart(kind: Kind, x: number, y: number): Part {
@@ -204,10 +209,10 @@ export function example(
 ): Project {
   const p = newProject(
     type === "simple"
-      ? "A little light"
+      ? "Cell, switch and bulb"
       : type === "series"
-        ? "Two lamps in series"
-        : "Two paths, one circuit",
+        ? "Two bulbs in series"
+        : "Two bulbs in parallel",
   );
   const cell = makePart("cell", 240, 160),
     sw = makePart("switch", 480, 160),
@@ -239,14 +244,14 @@ export function example(
   if (type === "series") {
     lamp.x = 280;
     const second = makePart("lamp", 460, 380);
-    second.label = "Lamp 2";
+    second.label = "Bulb 2";
     p.components.push(second);
     p.wires[1].to = { componentId: second.id, terminal: 1 };
     connect(second, 0, lamp, 1);
   }
   if (type === "parallel") {
     const second = makePart("lamp", 360, 280);
-    second.label = "Lamp 2";
+    second.label = "Bulb 2";
     p.components.push(second);
     const j1 = { id: uid(), x: 160, y: 280 },
       j2 = { id: uid(), x: 560, y: 280 };

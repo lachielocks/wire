@@ -568,11 +568,12 @@ kbd {
 }
 .wire-line {
   stroke: var(--ink);
-  opacity: 0.84;
+  opacity: 0.9;
 }
-.wire.selected .wire-line {
+.wire.selected .wire-line,
+.wire.drop-target .wire-line {
   stroke: var(--green);
-  stroke-width: 4;
+  stroke-width: 4.5;
 }
 .wire {
   cursor: pointer;
@@ -582,18 +583,54 @@ kbd {
 }
 .wire-preview {
   stroke: var(--green);
-  stroke-dasharray: 5 4;
+  stroke-dasharray: 6 5;
+  opacity: 0.9;
 }
-.wire-handle {
+.wire-handle,
+.wire-segment-handle {
   stroke: var(--green);
   fill: var(--panel);
   stroke-width: 2;
-  cursor: crosshair;
+  cursor: grab;
+}
+.wire-segment-handle {
+  fill: var(--green);
+  fill-opacity: 0.18;
+  cursor: ns-resize;
+}
+.wire-node {
+  fill: var(--ink);
+  stroke: none;
+  pointer-events: none;
+}
+.wire.selected .wire-node,
+.wire:hover .wire-node,
+.wire.drop-target .wire-node {
+  fill: var(--green);
 }
 .loose-end {
   fill: var(--canvas);
   stroke: var(--green);
   stroke-width: 2;
+}
+.wire-flow {
+  stroke: var(--green);
+  stroke-dasharray: 7 11;
+  stroke-dashoffset: 0;
+  opacity: 0.85;
+  pointer-events: none;
+  animation: wire-flow 0.7s linear infinite;
+}
+@keyframes wire-flow {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wire-flow {
+    animation: none;
+    opacity: 0.55;
+  }
 }
 .schematic-part {
   cursor: grab;

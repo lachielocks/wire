@@ -170,3 +170,36 @@ describe("branch editing and physical layout", () => {
     });
   });
 });
+
+describe("drop a part onto a wire", () => {
+  it("splices the part into the wire in series", () => {
+    const s = useStore.getState();
+    s.load(example());
+    const before = useStore.getState().project;
+    const wire = before.wires[0];
+    const from = endpoint(before, wire.from),
+      to = endpoint(before, wire.to);
+    s.add(
+      "ammeter",
+      { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 },
+      { splice: true },
+    );
+    const p = useStore.getState().project;
+    expect(p.components).toHaveLength(4);
+    expect(p.wires).toHaveLength(4);
+    expect(p.wires.some((w) => w.id === wire.id)).toBe(false);
+    const meter = p.components.find((c) => c.kind === "ammeter")!;
+    expect(
+      p.wires.filter((w) =>
+        [w.from, w.to].some(
+          (e) => "componentId" in e && e.componentId === meter.id,
+        ),
+      ),
+    ).toHaveLength(2);
+    expect(solve(p).status).toBe("complete");
+    expect(solve(p).sourceCurrent).toBeCloseTo(
+      1.5 / (0.1 + 0.01 + 0.01 + 7.5),
+      6,
+    );
+  });
+});
