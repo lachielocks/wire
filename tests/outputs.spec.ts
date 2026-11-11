@@ -1,8 +1,23 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 
-const shots = "/workspace/wire-shots";
-mkdirSync(shots, { recursive: true });
+function shotDir() {
+  for (const dir of [
+    process.env.WIRE_SHOTS,
+    "/workspace/wire-shots",
+    "test-results/wire-shots",
+  ]) {
+    if (!dir) continue;
+    try {
+      mkdirSync(dir, { recursive: true });
+      return dir;
+    } catch {
+      /* CI runners cannot write /workspace */
+    }
+  }
+  return "test-results/wire-shots";
+}
+const shots = shotDir();
 
 test.use({ reducedMotion: "no-preference" });
 
