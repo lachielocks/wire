@@ -585,6 +585,7 @@ kbd {
   stroke: var(--green);
   stroke-dasharray: 6 5;
   opacity: 0.9;
+  pointer-events: none;
 }
 .wire-handle,
 .wire-segment-handle {
