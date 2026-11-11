@@ -171,15 +171,241 @@ export function endpointKey(e: Endpoint, wireId = "", end = "") {
       ? `j:${e.junctionId}`
       : `loose:${wireId}:${end}`;
 }
+export const STUB = 20;
+export function leadVector(part: Part, t: 0 | 1): Point {
+  const a = (part.rotation * Math.PI) / 180,
+    s = t === 0 ? -1 : 1,
+    x = Math.cos(a) * s,
+    y = Math.sin(a) * s;
+  return Math.abs(x) >= Math.abs(y)
+    ? { x: Math.sign(x) || 1, y: 0 }
+    : { x: 0, y: Math.sign(y) || 1 };
+}
+export function terminalSide(
+  part: Part,
+  t: 0 | 1,
+): "left" | "right" | "top" | "bottom" {
+  const d = leadVector(part, t);
+  return d.x < 0 ? "left" : d.x > 0 ? "right" : d.y < 0 ? "top" : "bottom";
+}
+export function exitDir(circuit: Circuit, e: Endpoint): Point | null {
+  if ("componentId" in e) {
+    const part = circuit.components.find((c) => c.id === e.componentId);
+    return part ? leadVector(part, e.terminal) : null;
+  }
+  return null;
+}
+const addPoint = (a: Point, d: Point, k = 1): Point => ({
+  x: a.x + d.x * k,
+  y: a.y + d.y * k,
+});
+const samePoint = (a: Point, b: Point, e = 0.51) =>
+  Math.hypot(a.x - b.x, a.y - b.y) <= e;
+function collapse(points: Point[]): Point[] {
+  const cleaned: Point[] = [];
+  for (const p of points) {
+    const prev = cleaned[cleaned.length - 1];
+    if (!prev || !samePoint(p, prev)) cleaned.push({ x: p.x, y: p.y });
+  }
+  const out: Point[] = [];
+  for (let i = 0; i < cleaned.length; i++) {
+    const prev = out[out.length - 1],
+      cur = cleaned[i],
+      next = cleaned[i + 1];
+    if (
+      prev &&
+      next &&
+      ((prev.x === cur.x && cur.x === next.x) ||
+        (prev.y === cur.y && cur.y === next.y))
+    )
+      continue;
+    out.push(cur);
+  }
+  return out;
+}
+function segmentHitsBox(
+  a: Point,
+  b: Point,
+  box: { minX: number; maxX: number; minY: number; maxY: number },
+) {
+  const minX = Math.min(a.x, b.x),
+    maxX = Math.max(a.x, b.x),
+    minY = Math.min(a.y, b.y),
+    maxY = Math.max(a.y, b.y);
+  if (maxX < box.minX || minX > box.maxX || maxY < box.minY || minY > box.maxY)
+    return false;
+  if (a.y === b.y) return a.y >= box.minY && a.y <= box.maxY;
+  if (a.x === b.x) return a.x >= box.minX && a.x <= box.maxX;
+  return true;
+}
+function distToSegment(p: Point, a: Point, b: Point) {
+  const dx = b.x - a.x,
+    dy = b.y - a.y,
+    len2 = dx * dx + dy * dy,
+    t =
+      len2 === 0
+        ? 0
+        : Math.max(
+            0,
+            Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2),
+          );
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+function pathClear(
+  pts: Point[],
+  boxes: { minX: number; maxX: number; minY: number; maxY: number }[],
+  avoid: Point[],
+  ends: Point[],
+) {
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1],
+      b = pts[i];
+    if (boxes.some((box) => segmentHitsBox(a, b, box))) return false;
+    for (const p of avoid) {
+      if (ends.some((e) => samePoint(e, p))) continue;
+      if (distToSegment(p, a, b) < 14) return false;
+    }
+  }
+  return true;
+}
+function firstMoveOk(pts: Point[], dir: Point | null) {
+  if (!dir) return true;
+  for (let i = 1; i < pts.length; i++) {
+    if (samePoint(pts[0], pts[i])) continue;
+    const dx = Math.sign(pts[i].x - pts[0].x),
+      dy = Math.sign(pts[i].y - pts[0].y);
+    return dx !== -dir.x || dy !== -dir.y;
+  }
+  return true;
+}
+function lastMoveOk(pts: Point[], dir: Point | null) {
+  if (!dir || pts.length < 2) return true;
+  for (let i = pts.length - 2; i >= 0; i--) {
+    if (samePoint(pts[i], pts[pts.length - 1])) continue;
+    const dx = Math.sign(pts[pts.length - 1].x - pts[i].x),
+      dy = Math.sign(pts[pts.length - 1].y - pts[i].y);
+    return dx === -dir.x && dy === -dir.y;
+  }
+  return true;
+}
+function scorePath(pts: Point[]) {
+  let bends = 0,
+    length = 0;
+  for (let i = 1; i < pts.length; i++) {
+    length += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    if (i < pts.length - 1) {
+      const a = pts[i - 1],
+        b = pts[i],
+        c = pts[i + 1];
+      if ((b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y) <= 0) bends++;
+    }
+  }
+  return bends * 10000 + length;
+}
+function uniqueCoords(values: number[]) {
+  return [...new Set(values.map((v) => snap(v)))];
+}
+function candidates(
+  a: Point,
+  b: Point,
+  startDir: Point | null,
+  endDir: Point | null,
+) {
+  const paths: Point[][] = [];
+  const push = (pts: Point[]) => paths.push(collapse(pts));
+  if (a.x === b.x || a.y === b.y) push([a, b]);
+  push([a, { x: b.x, y: a.y }, b]);
+  push([a, { x: a.x, y: b.y }, b]);
+  const xs = uniqueCoords([
+    a.x,
+    b.x,
+    (a.x + b.x) / 2,
+    a.x + 40,
+    a.x - 40,
+    b.x + 40,
+    b.x - 40,
+    ...(startDir?.x ? [a.x + startDir.x * 40, a.x + startDir.x * 80] : []),
+    ...(endDir?.x ? [b.x + endDir.x * 40, b.x + endDir.x * 80] : []),
+  ]);
+  const ys = uniqueCoords([
+    a.y,
+    b.y,
+    (a.y + b.y) / 2,
+    a.y + 40,
+    a.y - 40,
+    b.y + 40,
+    b.y - 40,
+    ...(startDir?.y ? [a.y + startDir.y * 40, a.y + startDir.y * 80] : []),
+    ...(endDir?.y ? [b.y + endDir.y * 40, b.y + endDir.y * 80] : []),
+  ]);
+  for (const x of xs) push([a, { x, y: a.y }, { x, y: b.y }, b]);
+  for (const y of ys) push([a, { x: a.x, y }, { x: b.x, y }, b]);
+  if (startDir && endDir) {
+    for (const d of [20, 40, 60, 80]) {
+      const s = addPoint(a, startDir, d),
+        e = addPoint(b, endDir, d);
+      push([a, s, { x: e.x, y: s.y }, e, b]);
+      push([a, s, { x: s.x, y: e.y }, e, b]);
+    }
+  }
+  return paths;
+}
+export function routeOrthogonal(
+  from: Point,
+  to: Point,
+  startDir: Point | null,
+  endDir: Point | null,
+  boxes: { minX: number; maxX: number; minY: number; maxY: number }[],
+  avoid: Point[],
+): Point[] {
+  const start = startDir ? addPoint(from, startDir, STUB) : from,
+    end = endDir ? addPoint(to, endDir, STUB) : to,
+    prefix = startDir ? [from, start] : [from],
+    suffix = endDir ? [end, to] : [to],
+    ends = [from, to];
+  let best: Point[] | null = null,
+    bestScore = Infinity;
+  for (const mid of candidates(start, end, startDir, endDir)) {
+    const pts = collapse([...prefix, ...mid.slice(1, -1), ...suffix]);
+    if (!firstMoveOk(pts, startDir) || !lastMoveOk(pts, endDir)) continue;
+    if (!pathClear(pts, boxes, avoid, ends)) continue;
+    const score = scorePath(pts);
+    if (score < bestScore) {
+      bestScore = score;
+      best = pts;
+    }
+  }
+  return best ?? collapse([...prefix, { x: end.x, y: start.y }, ...suffix]);
+}
+function partBody(part: Part) {
+  return {
+    minX: part.x - 32,
+    maxX: part.x + 32,
+    minY: part.y - 32,
+    maxY: part.y + 32,
+  };
+}
 export function wirePoints(c: Circuit, w: Wire): Point[] {
-  const a = endpoint(c, w.from),
-    b = endpoint(c, w.to);
-  const anchors = [a, ...w.corners, b];
-  return anchors.flatMap((p, i) => {
-    if (!i) return [p];
-    const prev = anchors[i - 1];
-    return prev.x !== p.x && prev.y !== p.y ? [{ x: p.x, y: prev.y }, p] : [p];
-  });
+  const boxes = c.components.map(partBody),
+    avoid = c.components.flatMap((p) => [terminal(p, 0), terminal(p, 1)]),
+    anchors = [
+      { pt: endpoint(c, w.from), dir: exitDir(c, w.from) },
+      ...w.corners.map((pt) => ({ pt, dir: null as Point | null })),
+      { pt: endpoint(c, w.to), dir: exitDir(c, w.to) },
+    ];
+  const out: Point[] = [];
+  for (let i = 0; i < anchors.length - 1; i++) {
+    const piece = routeOrthogonal(
+      anchors[i].pt,
+      anchors[i + 1].pt,
+      i === 0 ? anchors[0].dir : null,
+      i === anchors.length - 2 ? anchors[anchors.length - 1].dir : null,
+      boxes,
+      avoid,
+    );
+    out.push(...(i ? piece.slice(1) : piece));
+  }
+  return collapse(out);
 }
 export const pathD = (points: Point[]) =>
   points.map((p, i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");

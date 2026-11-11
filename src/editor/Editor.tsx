@@ -721,40 +721,55 @@ export function Editor({ simulation }: { simulation: Simulation }) {
                       reducedMotion: reduceMotion,
                     })}
                   />
-                  {[0, 1].map((t) => (
-                    <g
-                      key={t}
-                      data-terminal={`${c.id}:${t}`}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`${c.label} terminal ${t === 0 ? "one" : "two"}`}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          const ep: Endpoint = {
+                  {[0, 1].map((t) => {
+                    const wired = s.project.wires.some((w) =>
+                      [w.from, w.to].some(
+                        (ep) =>
+                          "componentId" in ep &&
+                          ep.componentId === c.id &&
+                          ep.terminal === t,
+                      ),
+                    );
+                    return (
+                      <g
+                        key={t}
+                        data-terminal={`${c.id}:${t}`}
+                        data-open={wired ? undefined : "true"}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${c.label} terminal ${t === 0 ? "one" : "two"}`}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const ep: Endpoint = {
+                              componentId: c.id,
+                              terminal: t as 0 | 1,
+                            };
+                            if (draft) finish(ep);
+                            else {
+                              setDraft({ from: ep, corners: [] });
+                              setCursor(terminal(c, t as 0 | 1));
+                              wireDown.current = null;
+                            }
+                          }
+                        }}
+                        onPointerDown={(e) =>
+                          terminalDown(e, {
                             componentId: c.id,
                             terminal: t as 0 | 1,
-                          };
-                          if (draft) finish(ep);
-                          else {
-                            setDraft({ from: ep, corners: [] });
-                            setCursor(terminal(c, t as 0 | 1));
-                            wireDown.current = null;
-                          }
+                          })
                         }
-                      }}
-                      onPointerDown={(e) =>
-                        terminalDown(e, {
-                          componentId: c.id,
-                          terminal: t as 0 | 1,
-                        })
-                      }
-                    >
-                      <circle cx={t ? 40 : -40} r="12" fill="transparent" />
-                      <circle cx={t ? 40 : -40} r="4" className="terminal" />
-                    </g>
-                  ))}
+                      >
+                        <circle cx={t ? 40 : -40} r="12" fill="transparent" />
+                        <circle
+                          cx={t ? 40 : -40}
+                          r={wired ? 4 : 5}
+                          className={`terminal ${wired ? "connected" : "open-terminal"}`}
+                        />
+                      </g>
+                    );
+                  })}
                 </g>
                 <text textAnchor="middle" y="58" className="component-label">
                   {c.label}

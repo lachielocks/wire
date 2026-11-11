@@ -689,6 +689,11 @@ kbd {
   stroke-width: 1.8;
   cursor: crosshair;
 }
+.terminal.open-terminal {
+  fill: var(--canvas);
+  stroke: #e0a03a;
+  stroke-width: 2.3;
+}
 .schematic-part:hover .terminal {
   fill: var(--green-tint);
   stroke: var(--green);

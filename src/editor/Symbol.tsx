@@ -73,10 +73,10 @@ export function Symbol({
         <>
           {on && !overloaded && (
             <circle
-              r="30"
+              r="32"
               fill="#ffd36a"
               stroke="none"
-              opacity={0.18 + 0.4 * glow}
+              opacity={0.35 + 0.4 * glow}
             />
           )}
           <circle
@@ -85,7 +85,7 @@ export function Symbol({
               overloaded
                 ? "#cfc6b4"
                 : on
-                  ? `rgba(255, 236, 170, ${0.45 + 0.5 * glow})`
+                  ? `rgba(255, 220, 80, ${0.7 + 0.3 * glow})`
                   : "none"
             }
             stroke={overloaded ? "#7a6a52" : on ? "#67532b" : "currentColor"}
@@ -135,6 +135,7 @@ export function Symbol({
                   : undefined
             }
           >
+            <circle r="20" fill="currentColor" fillOpacity="0" stroke="none" />
             <path d="M0 -18V-8 M0 8V18 M-18 0H-8 M8 0H18" />
           </g>
         </>

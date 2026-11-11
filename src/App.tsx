@@ -584,14 +584,14 @@ export default function App() {
                       ? "Check your circuit"
                       : "Open circuit"}
               </strong>
-              <span className="status-description">
-                {simulation.status === "complete"
-                  ? simulation.sourceCurrent > 1e-6
-                    ? "Current is flowing."
-                    : "The path is complete, but almost no current is flowing."
-                  : simulation.status === "open"
-                    ? "The circuit is not complete yet."
-                    : simulation.message}
+              <span
+                className="status-description"
+                data-testid="simulation-hint"
+              >
+                {simulation.status === "complete" &&
+                simulation.sourceCurrent > 1e-6
+                  ? "Current is flowing."
+                  : simulation.message}
               </span>
             </div>
             <div className="status-details">

@@ -14,7 +14,12 @@ import * as THREE from "three";
 import type { OrbitControls as OrbitControlsType } from "three-stdlib";
 import { useStore } from "../core/store";
 import { outputLook } from "../core/output";
-import { type Simulation, type Wire, endpoint } from "../core/types";
+import {
+  type Simulation,
+  type Wire,
+  endpoint,
+  wirePoints,
+} from "../core/types";
 import { generateLayout, sceneEndpoint, world, type Layout } from "./layout";
 import { PhysicalPart } from "./Models";
 import { WoodenTable } from "./Wood";
@@ -29,16 +34,12 @@ function Cable({
 }) {
   const circuit = useStore((s) => s.project);
   const curve = useMemo(() => {
-    const a = sceneEndpoint(circuit, wire.from, layout),
-      b = sceneEndpoint(circuit, wire.to, layout);
-    const anchors = [
-      a,
-      ...wire.corners.map((p) => {
-        const q = world(p);
-        return [q[0], 0.06, q[2]] as [number, number, number];
-      }),
-      b,
-    ];
+    const anchors = wirePoints(circuit, wire).map((p, i, all) => {
+      if (i === 0) return sceneEndpoint(circuit, wire.from, layout);
+      if (i === all.length - 1) return sceneEndpoint(circuit, wire.to, layout);
+      const q = world(p);
+      return [q[0], 0.06, q[2]] as [number, number, number];
+    });
     const vectors: THREE.Vector3[] = [];
     anchors.forEach((p, i) => {
       if (i) {

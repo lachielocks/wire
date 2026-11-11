@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { solve } from "./solver";
-import { makePart, newProject, uid, type Wire } from "./types";
+import {
+  makePart,
+  newProject,
+  terminal,
+  terminalSide,
+  uid,
+  wirePoints,
+  type Wire,
+} from "./types";
 import {
   hitWire,
   moveWireSegment,
@@ -127,5 +135,76 @@ describe("splice into a wire", () => {
     };
     p.wires.push(dangling);
     expect(wireCarriesCurrent(p, dangling, solve(p))).toBe(false);
+  });
+});
+
+describe("lead-aware wire routing", () => {
+  it("leaves a right-hand terminal to the right, not back through the part", () => {
+    const p = newProject(),
+      motor = makePart("motor", 300, 200),
+      meter = makePart("voltmeter", 300, 360);
+    p.components = [motor, meter];
+    p.wires = [
+      {
+        id: uid(),
+        from: { componentId: motor.id, terminal: 1 },
+        to: { componentId: meter.id, terminal: 0 },
+        corners: [],
+      },
+    ];
+    const pts = wirePoints(p, p.wires[0]),
+      start = terminal(motor, 1),
+      left = terminal(motor, 0);
+    expect(pts[0]).toEqual(start);
+    expect(pts[1].x).toBeGreaterThan(start.x);
+    expect(pts[1].y).toBe(start.y);
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1],
+        b = pts[i];
+      const throughBody =
+        a.y === b.y &&
+        Math.abs(a.y - motor.y) < 32 &&
+        Math.min(a.x, b.x) < motor.x &&
+        Math.max(a.x, b.x) > motor.x;
+      expect(throughBody).toBe(false);
+      const dx = b.x - a.x,
+        dy = b.y - a.y,
+        len2 = dx * dx + dy * dy,
+        t =
+          len2 === 0
+            ? 0
+            : Math.max(
+                0,
+                Math.min(1, ((left.x - a.x) * dx + (left.y - a.y) * dy) / len2),
+              ),
+        dist = Math.hypot(left.x - (a.x + t * dx), left.y - (a.y + t * dy));
+      expect(dist).toBeGreaterThan(14);
+    }
+  });
+  it("keeps a straight lead when two terminals already line up", () => {
+    const p = newProject(),
+      cell = makePart("cell", 200, 200),
+      lamp = makePart("lamp", 400, 200);
+    p.components = [cell, lamp];
+    p.wires = [
+      {
+        id: uid(),
+        from: { componentId: cell.id, terminal: 1 },
+        to: { componentId: lamp.id, terminal: 0 },
+        corners: [],
+      },
+    ];
+    const pts = wirePoints(p, p.wires[0]);
+    expect(pts.every((q) => q.y === 200)).toBe(true);
+    expect(pts[0]).toEqual(terminal(cell, 1));
+    expect(pts.at(-1)).toEqual(terminal(lamp, 0));
+  });
+  it("names terminal sides from the part rotation", () => {
+    const motor = makePart("motor", 0, 0);
+    expect(terminalSide(motor, 0)).toBe("left");
+    expect(terminalSide(motor, 1)).toBe("right");
+    motor.rotation = 90;
+    expect(terminalSide(motor, 0)).toBe("top");
+    expect(terminalSide(motor, 1)).toBe("bottom");
   });
 });

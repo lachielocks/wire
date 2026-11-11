@@ -1,5 +1,6 @@
 import {
   endpointKey,
+  terminalSide,
   type Circuit,
   type Part,
   type Reading,
@@ -243,15 +244,23 @@ export function solve(c: Circuit): Simulation {
         warnings.push(
           `${p.label}: above its power rating. A real bulb could burn out.`,
         );
-      const connected = [0, 1].every((t) =>
-        c.wires.some((w) =>
-          [w.from, w.to].some(
-            (e) =>
-              "componentId" in e && e.componentId === p.id && e.terminal === t,
+      const missing = ([0, 1] as const).filter(
+        (t) =>
+          !c.wires.some((w) =>
+            [w.from, w.to].some(
+              (e) =>
+                "componentId" in e &&
+                e.componentId === p.id &&
+                e.terminal === t,
+            ),
           ),
-        ),
       );
-      if (!connected) warnings.push(`${p.label} has an unconnected terminal.`);
+      if (missing.length === 2)
+        warnings.push(`${p.label}'s terminals aren't connected.`);
+      else if (missing.length === 1)
+        warnings.push(
+          `${p.label}'s ${terminalSide(p, missing[0])} side isn't connected.`,
+        );
     });
     if (short)
       warnings.unshift(
@@ -259,14 +268,15 @@ export function solve(c: Circuit): Simulation {
       );
     // A balanced pair of sources (or a high-impedance meter) can have a complete
     // path without appreciable current. Do not call that a broken connection.
-    const closedPath = () =>
+    const closedPath = (skip?: (p: Part) => boolean) =>
       sources.some((supply) => {
         const adjacency = new Map<string, string[]>();
         for (const p of c.components) {
           if (
             p.id === supply.id ||
             ((p.kind === "switch" || p.kind === "push") && !p.closed) ||
-            (p.kind === "led" && !ledOn.has(p.id))
+            (p.kind === "led" && !ledOn.has(p.id)) ||
+            skip?.(p)
           )
             continue;
           const a = net(p, 0),
@@ -285,22 +295,41 @@ export function solve(c: Circuit): Simulation {
         }
         return false;
       });
-    const status = short
-      ? "short"
-      : sourceCurrent > 1e-6 || closedPath()
-        ? "complete"
-        : "open";
+    const hasPath = closedPath(),
+      pathWithoutVoltmeter = closedPath((p) => p.kind === "voltmeter"),
+      status = short
+        ? "short"
+        : sourceCurrent > 1e-6 || hasPath
+          ? "complete"
+          : "open";
+    const seriesVoltmeter =
+      status === "complete" &&
+      sourceCurrent <= 1e-6 &&
+      !pathWithoutVoltmeter &&
+      c.components.some((p) => p.kind === "voltmeter");
     return {
       status,
       message: short
         ? "This path has too little resistance and may allow excessive current."
         : !sources.length
           ? "Add a cell or battery to supply electrical energy."
-          : status === "complete"
-            ? sourceCurrent > 1e-6
-              ? "The circuit is complete and current is flowing."
-              : "The path is complete, but the sources balance or the current is very small."
-            : "There isn’t a complete path for current. Check your wires and switches.",
+          : seriesVoltmeter
+            ? "Voltmeter is in series, so almost no current flows. Connect it across a part instead."
+            : status === "complete"
+              ? sourceCurrent > 1e-6
+                ? "The circuit is complete and current is flowing."
+                : "The path is complete, but the sources balance or the current is very small."
+              : warnings.find(
+                    (w) =>
+                      w.includes("isn't connected") ||
+                      w.includes("aren't connected"),
+                  )
+                ? `Circuit isn't complete: ${warnings.find(
+                    (w) =>
+                      w.includes("isn't connected") ||
+                      w.includes("aren't connected"),
+                  )}`
+                : "There isn’t a complete path for current. Check your wires and switches.",
       readings,
       warnings,
       sourceCurrent,

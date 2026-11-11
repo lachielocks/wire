@@ -232,4 +232,30 @@ describe("complete paths at negligible current", () => {
       6,
     );
   });
+  it("explains a voltmeter wired in series", () => {
+    const p = loop(["cell", "voltmeter"], 1.5),
+      r = solve(p);
+    expect(r.status).toBe("complete");
+    expect(r.message).toContain("Voltmeter is in series");
+  });
+});
+
+describe("unconnected terminal hints", () => {
+  it("names the open side of a part", () => {
+    const p = loop(["cell", "motor"], 1.5);
+    p.wires = p.wires.filter(
+      (w) =>
+        !(
+          "componentId" in w.from &&
+          w.from.componentId === p.components[1].id &&
+          w.from.terminal === 1
+        ),
+    );
+    const r = solve(p);
+    expect(r.status).toBe("open");
+    expect(
+      r.warnings.some((w) => w.includes("Motor's right side isn't connected")),
+    ).toBe(true);
+    expect(r.message).toContain("Circuit isn't complete");
+  });
 });
