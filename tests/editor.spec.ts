@@ -138,7 +138,7 @@ test("saves to IndexedDB, recovers after reload, and opens a saved project", asy
   );
   await page.getByRole("button", { name: "Save project", exact: true }).click();
   await expect(
-    page.getByText("Saved on this device", { exact: true }),
+    page.getByRole("status").filter({ hasText: "Saved on this device" }),
   ).toBeVisible();
   await page.waitForTimeout(1000);
   await page.reload();

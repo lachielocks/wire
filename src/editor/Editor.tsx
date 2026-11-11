@@ -30,6 +30,7 @@ import {
   simplifyPoints,
   wireCarriesCurrent,
 } from "../core/wires";
+import { outputLook } from "../core/output";
 import { Symbol } from "./Symbol";
 type Draft = { from: Endpoint; corners: Point[]; replace?: string };
 export function Editor({ simulation }: { simulation: Simulation }) {
@@ -43,6 +44,29 @@ export function Editor({ simulation }: { simulation: Simulation }) {
   const [box, setBox] = useState<{ from: Point; to: Point } | null>(null);
   const [context, setContext] = useState<Point | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [reduceMotion, setReduceMotion] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  const [wireHandles, setWireHandles] = useState(false);
+  const selectedWire = s.selected.find((id) =>
+    s.project.wires.some((w) => w.id === id),
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)"),
+      update = () => setReduceMotion(mq.matches);
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    if (!selectedWire) {
+      setWireHandles(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setWireHandles(true), 400);
+    return () => window.clearTimeout(timer);
+  }, [selectedWire]);
   const openContext = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -483,7 +507,7 @@ export function Editor({ simulation }: { simulation: Simulation }) {
                     />
                   ) : null,
                 )}
-                {s.selected.includes(w.id) && (
+                {s.selected.includes(w.id) && wireHandles && (
                   <>
                     {[w.from, w.to].map((ep, i) => {
                       const p = endpoint(s.project, ep);
@@ -691,7 +715,11 @@ export function Editor({ simulation }: { simulation: Simulation }) {
                   <Symbol
                     kind={c.kind}
                     closed={c.closed}
-                    powered={!!reading && reading.brightness > 0.02}
+                    color={c.color}
+                    look={outputLook(c.kind, reading, {
+                      effects: s.project.settings.effects,
+                      reducedMotion: reduceMotion,
+                    })}
                   />
                   {[0, 1].map((t) => (
                     <g

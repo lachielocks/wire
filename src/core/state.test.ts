@@ -202,4 +202,32 @@ describe("drop a part onto a wire", () => {
       6,
     );
   });
+
+  it("does not splice a voltmeter into a wire", () => {
+    const s = useStore.getState();
+    s.load(example());
+    const before = useStore.getState().project;
+    const wire = before.wires[0],
+      from = endpoint(before, wire.from),
+      to = endpoint(before, wire.to);
+    s.add(
+      "voltmeter",
+      { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 },
+      { splice: true },
+    );
+    const p = useStore.getState().project;
+    expect(p.components).toHaveLength(4);
+    expect(p.wires).toHaveLength(3);
+    expect(p.wires.some((w) => w.id === wire.id)).toBe(true);
+    const meter = p.components.find((c) => c.kind === "voltmeter")!;
+    expect(
+      p.wires.some((w) =>
+        [w.from, w.to].some(
+          (e) => "componentId" in e && e.componentId === meter.id,
+        ),
+      ),
+    ).toBe(false);
+    expect(solve(p).status).toBe("complete");
+    expect(solve(p).sourceCurrent).toBeCloseTo(solve(before).sourceCurrent, 8);
+  });
 });

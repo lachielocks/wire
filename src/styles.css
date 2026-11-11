@@ -632,6 +632,33 @@ kbd {
     opacity: 0.55;
   }
 }
+
+.symbol-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: symbol-spin linear infinite;
+}
+@keyframes symbol-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.symbol-pulse {
+  transform-box: fill-box;
+  transform-origin: 24px 0;
+  animation: symbol-pulse 0.28s ease-in-out infinite;
+}
+@keyframes symbol-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .symbol-spin,
+  .symbol-pulse {
+    animation: none;
+  }
+}
 .schematic-part {
   cursor: grab;
   color: var(--ink);

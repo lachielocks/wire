@@ -89,7 +89,10 @@ export const useStore = create<State>((set, get) => ({
     }
     const part = makePart(kind, point.x, point.y);
     if (!get().project.settings.snap) Object.assign(part, point);
-    const hit = opts?.splice ? hitWire(get().project, point) : null;
+    const hit =
+      opts?.splice && kind !== "voltmeter"
+        ? hitWire(get().project, point)
+        : null;
     if (hit && get().project.wires.length >= 600) {
       get().toast("This project has reached the 600-wire limit.");
       return;

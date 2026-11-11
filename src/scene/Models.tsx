@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Html, RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
+import { outputLook } from "../core/output";
 import { format, type Part, type Reading } from "../core/types";
 import { useStore } from "../core/store";
 const metal = "#a9b0b2",
@@ -56,7 +57,14 @@ function Posts() {
     </>
   );
 }
-function Lamp({ brightness }: { brightness: number }) {
+function Lamp({
+  brightness,
+  overloaded = false,
+}: {
+  brightness: number;
+  overloaded?: boolean;
+}) {
+  const on = brightness > 0.02 && !overloaded;
   return (
     <>
       <Base color="#e8e0cb" />
@@ -71,26 +79,28 @@ function Lamp({ brightness }: { brightness: number }) {
       <mesh position={[0, 0.56, 0]} castShadow>
         <sphereGeometry args={[0.25, 28, 20]} />
         <meshPhysicalMaterial
-          color={brightness > 0.02 ? "#ffe6a2" : "#e3eceb"}
+          color={overloaded ? "#c8bca8" : on ? "#ffe6a2" : "#e3eceb"}
           transparent
-          opacity={brightness > 0.02 ? 0.62 : 0.3}
-          roughness={0.12}
+          opacity={
+            overloaded ? 0.5 : on ? 0.45 + 0.3 * Math.min(1, brightness) : 0.3
+          }
+          roughness={overloaded ? 0.55 : 0.12}
           metalness={0.05}
-          transmission={0.2}
+          transmission={overloaded ? 0.05 : 0.2}
           thickness={0.03}
         />
       </mesh>
       <mesh position={[0, 0.51, 0]}>
         <torusGeometry args={[0.075, 0.015, 8, 24, Math.PI * 1.6]} />
         <meshStandardMaterial
-          color="#af8758"
-          emissive="#ffbc50"
-          emissiveIntensity={brightness * 5}
+          color={overloaded ? "#5c5348" : "#af8758"}
+          emissive={overloaded ? "#000000" : "#ffbc50"}
+          emissiveIntensity={on ? brightness * 5 : 0}
         />
       </mesh>
       <Cylinder position={[-0.06, 0.38, 0]} radius={0.008} height={0.23} />
       <Cylinder position={[0.06, 0.38, 0]} radius={0.008} height={0.23} />
-      {brightness > 0.02 && (
+      {on && (
         <pointLight
           position={[0, 0.65, 0]}
           color="#ffbe63"
@@ -257,13 +267,17 @@ function Motor({ current, effects }: { current: number; effects: boolean }) {
   const invalidate = useThree((s) => s.invalidate);
   useEffect(() => invalidate(), [current, effects, invalidate]);
   const fan = useRef<THREE.Group>(null);
+  const running = Math.abs(current) > 1e-6;
   useFrame((_, d) => {
-    if (fan.current && effects && Math.abs(current) > 1e-6) {
+    if (!fan.current) return;
+    if (effects && running) {
       fan.current.rotation.y +=
         Math.min(35, Math.abs(current) * 100) *
         Math.min(d, 0.1) *
         Math.sign(current);
       invalidate();
+    } else if (running) {
+      fan.current.rotation.y = Math.sign(current) * 0.45;
     }
   });
   return (
@@ -274,7 +288,7 @@ function Motor({ current, effects }: { current: number; effects: boolean }) {
         position={[0, 0.3, 0]}
         radius={0.24}
         height={0.4}
-        color="#9badaa"
+        color={running ? "#b7cfc8" : "#9badaa"}
       />
       <Cylinder position={[0, 0.6, 0]} radius={0.035} height={0.25} />
       <group position={[0, 0.74, 0]} ref={fan}>
@@ -323,6 +337,50 @@ function LED({ c, brightness }: { c: Part; brightness: number }) {
           position={[0, 0.6, 0]}
           intensity={brightness * 0.6}
           distance={2}
+        />
+      )}
+    </>
+  );
+}
+function Buzzer({ on, pulse }: { on: boolean; pulse: boolean }) {
+  const invalidate = useThree((s) => s.invalidate);
+  const cap = useRef<THREE.Group>(null);
+  useEffect(() => invalidate(), [on, pulse, invalidate]);
+  useFrame((state) => {
+    if (!cap.current) return;
+    cap.current.scale.setScalar(
+      pulse ? 1 + Math.sin(state.clock.elapsedTime * 20) * 0.08 : 1,
+    );
+    if (pulse) invalidate();
+  });
+  return (
+    <>
+      <Base />
+      <Posts />
+      <group ref={cap}>
+        <Cylinder
+          position={[0, 0.28, 0]}
+          radius={0.24}
+          height={0.32}
+          color={on ? "#2f4a3c" : "#323a39"}
+        />
+        {[-0.12, 0, 0.12].map((x) => (
+          <mesh key={x} position={[x, 0.45, 0]}>
+            <boxGeometry args={[0.035, 0.01, 0.25]} />
+            <meshStandardMaterial
+              color="#121915"
+              emissive={on ? "#63af79" : "#000000"}
+              emissiveIntensity={on ? (pulse ? 1.2 : 0.7) : 0}
+            />
+          </mesh>
+        ))}
+      </group>
+      {on && (
+        <pointLight
+          position={[0, 0.55, 0]}
+          color="#63af79"
+          intensity={pulse ? 0.35 : 0.18}
+          distance={1.6}
         />
       )}
     </>
@@ -435,7 +493,10 @@ export function PhysicalPart({
         {c.kind === "cell" || c.kind === "battery" ? (
           <Cell battery={c.kind === "battery"} />
         ) : c.kind === "lamp" ? (
-          <Lamp brightness={reading?.brightness ?? 0} />
+          <Lamp
+            brightness={reading?.brightness ?? 0}
+            overloaded={(reading?.brightness ?? 0) > 1.3}
+          />
         ) : c.kind === "switch" || c.kind === "push" ? (
           <Switch closed={c.closed} effects={effects} />
         ) : c.kind === "resistor" || c.kind === "variable" ? (
@@ -447,6 +508,11 @@ export function PhysicalPart({
           <Motor current={reading?.current ?? 0} effects={effects} />
         ) : c.kind === "led" ? (
           <LED c={c} brightness={reading?.brightness ?? 0} />
+        ) : c.kind === "buzzer" ? (
+          <Buzzer
+            on={outputLook("buzzer", reading).on}
+            pulse={outputLook("buzzer", reading, { effects }).pulse}
+          />
         ) : c.kind === "ammeter" || c.kind === "voltmeter" ? (
           <Meter
             value={

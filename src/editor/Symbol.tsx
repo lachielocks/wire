@@ -1,16 +1,25 @@
 import type { Kind } from "../core/types";
+import type { OutputLook } from "../core/output";
 export function Symbol({
   kind,
   closed = false,
-  powered = false,
+  look,
+  color = "#ee564a",
 }: {
   kind: Kind;
   closed?: boolean;
-  powered?: boolean;
+  look?: OutputLook;
+  color?: string;
 }) {
-  const circle = (label: string) => (
+  const on = look?.on ?? false,
+    level = look?.level ?? 0,
+    overloaded = look?.overloaded ?? false,
+    spin = look?.spin ?? 0,
+    pulse = look?.pulse ?? false;
+  const glow = Math.min(1, Math.max(0, level));
+  const circle = (label: string, fill = "none") => (
     <>
-      <circle r="23" />
+      <circle r="23" fill={fill} />
       <text
         y="6"
         textAnchor="middle"
@@ -23,6 +32,7 @@ export function Symbol({
       </text>
     </>
   );
+  const spinSeconds = Math.max(0.18, 0.9 / Math.max(0.08, Math.abs(spin) * 8));
   return (
     <g
       fill="none"
@@ -30,6 +40,18 @@ export function Symbol({
       strokeWidth="2.2"
       strokeLinecap="round"
       strokeLinejoin="round"
+      data-output={
+        kind === "lamp" ||
+        kind === "led" ||
+        kind === "motor" ||
+        kind === "buzzer"
+          ? overloaded
+            ? "overloaded"
+            : on
+              ? "on"
+              : "off"
+          : undefined
+      }
     >
       {["cell", "battery"].includes(kind) ? (
         <>
@@ -49,14 +71,32 @@ export function Symbol({
       )}
       {kind === "lamp" && (
         <>
+          {on && !overloaded && (
+            <circle
+              r="30"
+              fill="#ffd36a"
+              stroke="none"
+              opacity={0.18 + 0.4 * glow}
+            />
+          )}
           <circle
             r="23"
-            fill={powered ? "#fff0b3" : "none"}
-            stroke={powered ? "#67532b" : "currentColor"}
+            fill={
+              overloaded
+                ? "#cfc6b4"
+                : on
+                  ? `rgba(255, 236, 170, ${0.45 + 0.5 * glow})`
+                  : "none"
+            }
+            stroke={overloaded ? "#7a6a52" : on ? "#67532b" : "currentColor"}
           />
           <path
-            d="M-16 -16L16 16M-16 16L16 -16"
-            stroke={powered ? "#67532b" : "currentColor"}
+            d={
+              overloaded
+                ? "M-16 -16L-4 -2 M4 2L16 16M-16 16L-3 5 M5 -3L16 -16"
+                : "M-16 -16L16 16M-16 16L16 -16"
+            }
+            stroke={overloaded ? "#7a6a52" : on ? "#67532b" : "currentColor"}
           />
         </>
       )}
@@ -79,15 +119,66 @@ export function Symbol({
       )}
       {kind === "ammeter" && circle("A")}
       {kind === "voltmeter" && circle("V")}
-      {kind === "motor" && circle("M")}
+      {kind === "motor" && (
+        <>
+          {circle("M", on ? "rgba(67, 140, 107, 0.16)" : "none")}
+          <g
+            className={spin ? "symbol-spin" : undefined}
+            style={
+              spin
+                ? {
+                    animationDuration: `${spinSeconds}s`,
+                    animationDirection: spin < 0 ? "reverse" : "normal",
+                  }
+                : on
+                  ? { transform: "rotate(28deg)" }
+                  : undefined
+            }
+          >
+            <path d="M0 -18V-8 M0 8V18 M-18 0H-8 M8 0H18" />
+          </g>
+        </>
+      )}
       {kind === "buzzer" && (
         <>
-          <path d="M-24 -14H7L23 -25V25L7 14H-24Z M29 -16Q44 0 29 16" />
+          <path
+            d="M-24 -14H7L23 -25V25L7 14H-24Z"
+            fill={on ? "rgba(67, 140, 107, 0.16)" : "none"}
+          />
+          <path
+            className={pulse ? "symbol-pulse" : undefined}
+            d="M29 -16Q44 0 29 16"
+            opacity={on ? 1 : 0.7}
+          />
+          {on && (
+            <path
+              className={pulse ? "symbol-pulse" : undefined}
+              d="M33 -22Q52 0 33 22"
+              opacity={pulse ? 0.8 : 1}
+            />
+          )}
         </>
       )}
       {kind === "led" && (
         <>
-          <path d="M-40 0H-16 M16 0H40 M-16 -17L15 0L-16 17Z M16 -18V18 M4 -27L17 -40 M14 -40H17V-37 M20 -18L33 -31 M30 -31H33V-28" />
+          <path d="M-40 0H-16 M16 0H40 M16 -18V18" />
+          <path
+            d="M-16 -17L15 0L-16 17Z"
+            fill={on ? color : "none"}
+            fillOpacity={on ? 0.3 + 0.7 * glow : 0}
+            stroke={on ? color : "currentColor"}
+          />
+          {on && (
+            <circle
+              r="10"
+              cx="0"
+              cy="0"
+              fill={color}
+              stroke="none"
+              opacity={0.2 + 0.35 * glow}
+            />
+          )}
+          <path d="M4 -27L17 -40 M14 -40H17V-37 M20 -18L33 -31 M30 -31H33V-28" />
         </>
       )}
     </g>

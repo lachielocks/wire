@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { useStore } from "../core/store";
+import { outputLook } from "../core/output";
 import { format, library, type Part, type Simulation } from "../core/types";
 import { Symbol } from "../editor/Symbol";
 import { AnimatedContent } from "./AnimatedContent";
@@ -74,7 +75,10 @@ export function Inspector({
               <Symbol
                 kind={c.kind}
                 closed={c.closed}
-                powered={(simulation.readings[c.id]?.brightness ?? 0) > 0.02}
+                color={c.color}
+                look={outputLook(c.kind, simulation.readings[c.id], {
+                  effects: s.project.settings.effects,
+                })}
               />
             </svg>
             <span>{library.find((p) => p.kind === c.kind)?.group}</span>

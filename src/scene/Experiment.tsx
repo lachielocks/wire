@@ -13,6 +13,7 @@ import { Box, Crosshair, Maximize, RotateCcw } from "lucide-react";
 import * as THREE from "three";
 import type { OrbitControls as OrbitControlsType } from "three-stdlib";
 import { useStore } from "../core/store";
+import { outputLook } from "../core/output";
 import { type Simulation, type Wire, endpoint } from "../core/types";
 import { generateLayout, sceneEndpoint, world, type Layout } from "./layout";
 import { PhysicalPart } from "./Models";
@@ -209,6 +210,17 @@ export function Experiment({
     cache.current = generateLayout(s.project, cache.current);
     return cache.current;
   }, [s.project.id, s.project.components]);
+  const reduceMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const effects = s.project.settings.effects && !reduceMotion;
+  const liveMotion = s.project.components.some((c) => {
+    const look = outputLook(c.kind, simulation.readings[c.id], {
+      effects,
+      reducedMotion: reduceMotion,
+    });
+    return look.spin !== 0 || look.pulse;
+  });
   return (
     <div className={`experiment ${hidden ? "scene-hidden" : ""}`}>
       <Audio simulation={simulation} />
@@ -224,7 +236,7 @@ export function Experiment({
             onCreated={({ gl }) => {
               gl.domElement.dataset.testid = "experiment-canvas";
             }}
-            frameloop={hidden ? "never" : "demand"}
+            frameloop={hidden ? "never" : liveMotion ? "always" : "demand"}
           >
             <color attach="background" args={["#ecece5"]} />
             <ambientLight intensity={1.3} />
@@ -261,10 +273,7 @@ export function Experiment({
                 position={layout.get(c.id)!.position}
                 reading={simulation.readings[c.id]}
                 selected={s.selected.includes(c.id)}
-                effects={
-                  s.project.settings.effects &&
-                  !window.matchMedia("(prefers-reduced-motion: reduce)").matches
-                }
+                effects={effects}
                 onSelect={() => s.select([c.id])}
                 onToggle={() => s.update(c.id, { closed: !c.closed })}
               />
