@@ -1,4 +1,5 @@
 import {
+  DEFAULT_FUSE_RATING,
   endpointKey,
   terminalSide,
   type Circuit,
@@ -65,6 +66,7 @@ export function resistance(p: Part): number {
     case "switch":
     case "push":
       return p.closed ? 0.01 : 1e12;
+    case "fuse":
     case "ammeter":
       return 0.01;
     case "voltmeter":
@@ -73,7 +75,88 @@ export function resistance(p: Part): number {
       return p.resistance;
   }
 }
-export function solve(c: Circuit): Simulation {
+const sourceResistance = 0.1;
+const reverseConductance = 1e-10;
+const diode = (p: Part) => p.kind === "led" || p.kind === "diode";
+const forwardConductance = (p: Part) => (p.kind === "led" ? 0.1 : 0.5);
+const open = (p: Part) =>
+  p.kind === "capacitor" ||
+  ((p.kind === "switch" || p.kind === "push" || p.kind === "fuse") &&
+    !p.closed);
+
+function branchCurrent(p: Part, v: number) {
+  if (source(p)) return (v - p.voltage) / sourceResistance;
+  if (open(p)) return 0;
+  if (diode(p))
+    return (
+      v * reverseConductance +
+      Math.max(0, v - p.forwardVoltage) * forwardConductance(p)
+    );
+  return v / resistance(p);
+}
+
+function faultFor(p: Part, current: number, power: number): Reading["fault"] {
+  const stress = source(p)
+    ? Math.abs(current) / 5
+    : p.kind === "led" || p.kind === "diode"
+      ? Math.max(0, current) / (p.kind === "led" ? 0.03 : 0.1)
+      : ["lamp", "resistor", "variable", "inductor"].includes(p.kind)
+        ? power / (p.nominalPower * 1.3)
+        : 0;
+  if (source(p) ? stress > 1 : stress >= 2) return "burst";
+  if (stress > 1) return "overheat";
+}
+
+export function solve(circuit: Circuit): Simulation {
+  const tripped = new Set<string>();
+  const withOpenFuses = (ids: ReadonlySet<string>): Circuit => ({
+    ...circuit,
+    components: circuit.components.map((p) =>
+      ids.has(p.id) ? { ...p, closed: false } : p,
+    ),
+  });
+  let circuitState = circuit;
+  for (;;) {
+    const result = solveDC(circuitState);
+    const intact = circuitState.components.filter(
+      (p) => p.kind === "fuse" && p.closed,
+    );
+    const newlyTripped = intact.filter(
+      (p) =>
+        Math.abs(result.readings[p.id]?.current ?? 0) >
+        (p.ratedCurrent ?? DEFAULT_FUSE_RATING) * (1 + 1e-8),
+    );
+
+    if (!newlyTripped.length && intact.length) {
+      const burning = circuitState.components.filter(
+        (p) =>
+          (p.kind === "lamp" || p.kind === "led") &&
+          result.readings[p.id]?.fault,
+      );
+      if (burning.length) {
+        // A fuse provides extra protection in the simulator when opening it
+        // actually clears the light's overload, even below its current rating.
+        const protector = intact.find((p) => {
+          if (Math.abs(result.readings[p.id]?.current ?? 0) <= 1e-6)
+            return false;
+          const opened = solveDC(withOpenFuses(new Set([...tripped, p.id])));
+          return burning.some((light) => {
+            const reading = opened.readings[light.id];
+            return reading && !reading.fault;
+          });
+        });
+        if (protector) newlyTripped.push(protector);
+      }
+    }
+    if (!newlyTripped.length) {
+      return tripped.size ? { ...result, trippedFuses: [...tripped] } : result;
+    }
+    newlyTripped.forEach((p) => tripped.add(p.id));
+    circuitState = withOpenFuses(tripped);
+  }
+}
+
+function solveDC(c: Circuit): Simulation {
   const empty = (
     status: Simulation["status"],
     message: string,
@@ -108,7 +191,9 @@ export function solve(c: Circuit): Simulation {
       p.resistance <= 0 ||
       p.nominalVoltage <= 0 ||
       p.nominalPower <= 0 ||
-      p.forwardVoltage <= 0
+      p.forwardVoltage <= 0 ||
+      (p.ratedCurrent !== undefined &&
+        (!Number.isFinite(p.ratedCurrent) || p.ratedCurrent <= 0))
     )
       return empty(
         "error",
@@ -125,8 +210,7 @@ export function solve(c: Circuit): Simulation {
     const islands = new Union();
     nodes.forEach((n) => islands.find(n));
     c.components.forEach((p) => {
-      if (!((p.kind === "switch" || p.kind === "push") && !p.closed))
-        islands.join(net(p, 0), net(p, 1));
+      if (!open(p)) islands.join(net(p, 0), net(p, 1));
     });
     const refs = new Map<string, string>();
     nodes.forEach((n) => {
@@ -137,88 +221,116 @@ export function solve(c: Circuit): Simulation {
       unknowns = nodes.filter((n) => !grounds.has(n));
     const ix = new Map(unknowns.map((n, i) => [n, i]));
     const sources = c.components.filter(source);
-    const ledOn = new Set<string>();
-    let values: number[] = [],
-      converged = false;
-    const voltage = (n: string) =>
-      grounds.has(n) ? 0 : (values[ix.get(n)!] ?? 0);
-    for (let iteration = 0; iteration < 80; iteration++) {
-      const size = unknowns.length + sources.length,
-        m = Array.from({ length: size }, () => Array(size).fill(0)),
-        b = Array(size).fill(0);
+    const voltage = (n: string, solution: number[]) =>
+      solution[ix.get(n)!] ?? 0;
+    const branches = c.components.map((p) => ({
+      p,
+      from: net(p, 0),
+      to: net(p, 1),
+      a: ix.get(net(p, 0)),
+      z: ix.get(net(p, 1)),
+    }));
+    const drop = (branch: (typeof branches)[number], solution: number[]) =>
+      voltage(branch.from, solution) - voltage(branch.to, solution);
+    const conductors = branches.filter(({ p }) => !open(p));
+    const diodes = conductors.filter(({ p }) => diode(p));
+    let values: number[] = Array(unknowns.length).fill(0);
+    let converged = false;
+    for (let iteration = 0; iteration < 100; iteration++) {
+      const size = unknowns.length;
+      const m = Array.from({ length: size }, () => Array(size).fill(0));
+      const b = Array(size).fill(0);
       const add = (i: number | undefined, j: number | undefined, v: number) => {
         if (i !== undefined && j !== undefined) m[i][j] += v;
       };
-      const inject = (i: number | undefined, v: number) => {
-        if (i !== undefined) b[i] += v;
-      };
-      c.components.forEach((p) => {
-        const a = ix.get(net(p, 0)),
-          z = ix.get(net(p, 1));
-        if (source(p)) {
-          const k = unknowns.length + sources.indexOf(p);
-          add(a, k, 1);
-          add(z, k, -1);
-          add(k, a, 1);
-          add(k, z, -1);
-          // Physical source internal resistance: 0.1 Ω, limits fault current and handles parallel cells.
-          m[k][k] = -0.1;
-          b[k] = p.voltage;
-        } else if (!((p.kind === "switch" || p.kind === "push") && !p.closed)) {
-          const on = ledOn.has(p.id),
-            g = p.kind === "led" ? (on ? 0.1 : 1e-10) : 1 / resistance(p);
-          add(a, a, g);
-          add(z, z, g);
-          add(a, z, -g);
-          add(z, a, -g);
-          if (p.kind === "led" && on) {
-            inject(a, g * p.forwardVoltage);
-            inject(z, -g * p.forwardVoltage);
-          }
-        }
-      });
-      values = linearSolve(m, b);
-      let changed = false;
-      c.components
-        .filter((p) => p.kind === "led")
-        .forEach((p) => {
-          const v = voltage(net(p, 0)) - voltage(net(p, 1)),
-            on = v > p.forwardVoltage + 1e-9;
-          if (on !== ledOn.has(p.id)) {
-            changed = true;
-            if (on) ledOn.add(p.id);
-            else ledOn.delete(p.id);
-          }
-        });
-      if (!changed) {
+      for (const branch of conductors) {
+        const { p, a, z } = branch;
+        const on = diode(p) && drop(branch, values) > p.forwardVoltage;
+        const g = source(p)
+          ? 1 / sourceResistance
+          : diode(p)
+            ? reverseConductance + (on ? forwardConductance(p) : 0)
+            : 1 / resistance(p);
+        const injection = source(p)
+          ? p.voltage / sourceResistance
+          : on
+            ? p.forwardVoltage * forwardConductance(p)
+            : 0;
+        add(a, a, g);
+        add(z, z, g);
+        add(a, z, -g);
+        add(z, a, -g);
+        if (a !== undefined) b[a] += injection;
+        if (z !== undefined) b[z] -= injection;
+      }
+      const candidate = linearSolve(m, b);
+      if (
+        diodes.every((branch) => {
+          const threshold = branch.p.forwardVoltage;
+          const before = drop(branch, values) - threshold;
+          const after = drop(branch, candidate) - threshold;
+          return Math.abs(after) <= 1e-9 || before > 0 === after > 0;
+        })
+      ) {
+        values = candidate;
         converged = true;
         break;
       }
+
+      // Minimize the convex circuit energy along the Newton step. Taking the
+      // full step across several diode knees can alternate between two states.
+      const changes = conductors.map((branch) => {
+        const initial = drop(branch, values);
+        return {
+          p: branch.p,
+          initial,
+          delta: drop(branch, candidate) - initial,
+        };
+      });
+      const slope = (step: number) =>
+        changes.reduce(
+          (sum, { p, initial, delta }) =>
+            sum + delta * branchCurrent(p, initial + step * delta),
+          0,
+        );
+      let low = 0;
+      let high = 1;
+      if (slope(1) > 0) {
+        for (let i = 0; i < 40; i++) {
+          const mid = (low + high) / 2;
+          if (slope(mid) > 0) high = mid;
+          else low = mid;
+        }
+      } else low = 1;
+      const step = (low + high) / 2;
+      values = candidate.map(
+        (value, i) => values[i] + step * (value - values[i]),
+      );
     }
     if (!converged)
       return empty(
         "error",
-        "The LED model did not converge for this configuration. Try simplifying the circuit.",
+        "The diode model did not converge for this circuit.",
       );
     const readings: Record<string, Reading> = {},
       warnings: string[] = [];
     let sourceCurrent = 0,
       short = false;
-    c.components.forEach((p) => {
-      const v = voltage(net(p, 0)) - voltage(net(p, 1));
-      let current = source(p)
-        ? values[unknowns.length + sources.indexOf(p)]
-        : p.kind === "led"
-          ? ledOn.has(p.id)
-            ? (v - p.forwardVoltage) / 10
-            : v * 1e-10
-          : (p.kind === "switch" || p.kind === "push") && !p.closed
-            ? 0
-            : v / resistance(p);
-      if (Math.abs(current) < 1e-9) current = 0;
-      const power = v * current;
+    for (const branch of branches) {
+      const { p, from, to } = branch;
+      const floatingVoltage = islands.find(from) !== islands.find(to);
+      const v = floatingVoltage ? 0 : drop(branch, values);
+      const measured = branchCurrent(p, v);
+      const current = Math.abs(measured) < 1e-12 ? 0 : measured;
+      const power = current === 0 ? 0 : v * current;
+      const fault =
+        p.kind === "fuse" && !p.closed
+          ? "fuse"
+          : source(p) && from === to
+            ? "burst"
+            : faultFor(p, current, power);
       readings[p.id] = {
-        voltage: Math.abs(v) < 1e-9 ? 0 : v,
+        voltage: Math.abs(v) < 1e-12 ? 0 : v,
         current,
         power,
         brightness:
@@ -227,6 +339,8 @@ export function solve(c: Circuit): Simulation {
             : p.kind === "led"
               ? Math.min(1, Math.max(0, current / 0.02))
               : 0,
+        ...(floatingVoltage ? { floatingVoltage } : {}),
+        ...(fault ? { fault } : {}),
       };
       if (source(p)) {
         sourceCurrent += Math.abs(current);
@@ -244,6 +358,15 @@ export function solve(c: Circuit): Simulation {
         warnings.push(
           `${p.label}: above its power rating. A real bulb could burn out.`,
         );
+      if (fault === "fuse")
+        warnings.push(
+          `${p.label} has blown. Fix the overload before replacing it.`,
+        );
+      if (
+        ["diode", "resistor", "variable", "inductor"].includes(p.kind) &&
+        fault
+      )
+        warnings.push(`${p.label}: above its simulated rating.`);
       const missing = ([0, 1] as const).filter(
         (t) =>
           !c.wires.some((w) =>
@@ -261,7 +384,7 @@ export function solve(c: Circuit): Simulation {
         warnings.push(
           `${p.label}'s ${terminalSide(p, missing[0])} side isn't connected.`,
         );
-    });
+    }
     if (short)
       warnings.unshift(
         "A source is shorted or supplying over 5 A. Open the switch and add resistance.",
@@ -274,8 +397,8 @@ export function solve(c: Circuit): Simulation {
         for (const p of c.components) {
           if (
             p.id === supply.id ||
-            ((p.kind === "switch" || p.kind === "push") && !p.closed) ||
-            (p.kind === "led" && !ledOn.has(p.id)) ||
+            open(p) ||
+            (diode(p) && readings[p.id].voltage <= p.forwardVoltage) ||
             skip?.(p)
           )
             continue;
@@ -333,7 +456,9 @@ export function solve(c: Circuit): Simulation {
       readings,
       warnings,
       sourceCurrent,
-      nodeVoltages: Object.fromEntries(nodes.map((n) => [n, voltage(n)])),
+      nodeVoltages: Object.fromEntries(
+        nodes.map((n) => [n, voltage(n, values)]),
+      ),
     };
   } catch (error) {
     return empty(

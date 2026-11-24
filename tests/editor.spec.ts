@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { example, makePart } from "../src/core/types";
 async function boot(page: Page) {
   await page.goto("/");
   await page.getByRole("button", { name: "Examples" }).click();
@@ -284,14 +285,14 @@ test("creates an explicit junction without changing the existing circuit", async
   page,
 }) => {
   await boot(page);
-  const cell = await id(page, "cell"),
-    sw = await id(page, "switch");
-  const a = (await page.locator(`[data-terminal="${cell}:1"]`).boundingBox())!,
-    b = (await page.locator(`[data-terminal="${sw}:0"]`).boundingBox())!;
-  await page.mouse.dblclick(
-    (a.x + a.width / 2 + b.x + b.width / 2) / 2,
-    a.y + a.height / 2,
-  );
+  await page.getByRole("button", { name: "Fit circuit", exact: true }).click();
+  const path = page.locator(".wire").first().locator("path").first();
+  const middle = await path.evaluate((wire: SVGPathElement) => {
+    const p = wire.getPointAtLength(wire.getTotalLength() / 2);
+    const screen = p.matrixTransform(wire.getScreenCTM()!);
+    return { x: screen.x, y: screen.y };
+  });
+  await page.mouse.dblclick(middle.x, middle.y);
   await expect(page.locator(".wire")).toHaveCount(4);
   await expect(page.getByTestId("simulation-status")).toHaveText(
     "Circuit complete",
@@ -411,5 +412,83 @@ test("keeps the schematic and simulator working when WebGL is unavailable", asyn
   await page.getByTestId("part-switch").dblclick();
   await expect(page.getByTestId("simulation-status")).toHaveText(
     "Open circuit",
+  );
+});
+
+test("builds parallel branches directly on wires and undoes each junction with its branch", async ({
+  page,
+}) => {
+  const project = example();
+  const second = makePart("lamp", 360, 280);
+  second.label = "Branch bulb";
+  project.components.push(second);
+  project.view = "2d";
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await page.locator("input[type=file]").setInputFiles({
+    name: "branch.wire.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(project)),
+  });
+  await expect(page.locator(".wire")).toHaveCount(3);
+
+  const rail = (x: number) =>
+    page
+      .locator(".wire-line")
+      .first()
+      .evaluate((path: SVGGraphicsElement, x) => {
+        const p = new DOMPoint(x, 280).matrixTransform(path.getScreenCTM()!);
+        return { x: p.x, y: p.y };
+      }, x);
+  await page.getByRole("button", { name: "Fit circuit", exact: true }).click();
+  await page.getByRole("button", { name: "Wire tool", exact: true }).click();
+  await expect(async () => {
+    const position = await rail(160);
+    await page.mouse.move(position.x + 3, position.y);
+    expect(await page.locator(".wire-tap").count()).toBe(1);
+  }).toPass();
+  const a = await rail(160);
+  const b = await rail(560);
+  await page.mouse.click(a.x + 3, a.y);
+  await expect(page.locator(".wire-tap-origin")).toBeVisible();
+  await expect(page.locator(".wire")).toHaveCount(3);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".junction-dot")).toHaveCount(0);
+
+  await page.keyboard.press("w");
+  await page.mouse.click(a.x + 3, a.y);
+  await page.locator(`[data-terminal="${second.id}:0"]`).click();
+  await expect(page.locator(".junction-dot")).toHaveCount(1);
+  const right = (await page
+    .locator(`[data-terminal="${second.id}:1"]`)
+    .boundingBox())!;
+  await page.mouse.move(right.x + right.width / 2, right.y + right.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x - 3, b.y, { steps: 8 });
+  await expect(page.locator(".wire-tap")).toBeVisible();
+  await page.mouse.up();
+  await expect(page.locator(".junction-dot")).toHaveCount(2);
+  await expect(page.locator(".wire")).toHaveCount(7);
+
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(page.locator(".junction-dot")).toHaveCount(1);
+  await expect(page.locator(".wire")).toHaveCount(5);
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(page.locator(".junction-dot")).toHaveCount(2);
+
+  await page.keyboard.press("v");
+  for (const bulb of await page.getByTestId("part-lamp").all()) {
+    await bulb.click();
+    await expect(page.getByTestId("reading-current")).toHaveText("194.3 mA");
+    await expect(page.getByTestId("reading-voltage")).toHaveText("1.46 V");
+  }
+  await page.getByRole("button", { name: "Save project", exact: true }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Saved on this device" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".junction-dot")).toHaveCount(2);
+  await expect(page.getByTestId("simulation-status")).toHaveText(
+    "Circuit complete",
   );
 });

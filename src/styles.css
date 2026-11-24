@@ -2231,3 +2231,75 @@ kbd {
 .scene-controls {
   z-index: 3;
 }
+
+.editor-tool-wire .wire,
+.editor-tool-wire .junction,
+.wiring .wire,
+.wiring .junction {
+  cursor: crosshair;
+}
+.wire-tap {
+  fill: var(--green);
+  stroke: var(--canvas);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.wire-tap-origin {
+  fill: var(--canvas);
+  stroke: var(--green);
+}
+.junction-dot {
+  fill: var(--ink);
+}
+.junction-dot.selected,
+.junction:hover .junction-dot {
+  fill: var(--green);
+}
+.schematic-fault {
+  pointer-events: none;
+}
+.fault-flame {
+  transform-origin: 0 6px;
+  animation: fault-flicker 0.42s ease-in-out infinite alternate;
+}
+.fault-burst {
+  animation: fault-burst 0.75s cubic-bezier(0.15, 0.6, 0.3, 1) both;
+}
+@keyframes fault-flicker {
+  from {
+    transform: scale(0.89, 0.96) rotate(-4deg);
+  }
+  to {
+    transform: scale(1.06, 1.12) rotate(5deg);
+  }
+}
+@keyframes fault-burst {
+  from {
+    transform: scale(0.25);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.85);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fault-flame,
+  .fault-burst {
+    animation: none;
+  }
+  .fault-burst {
+    display: none;
+  }
+}
+
+[data-fuse-state="blown"] .component-value {
+  fill: var(--danger);
+  font-weight: 700;
+}
+.physical-label[data-fuse-state="blown"] small,
+.blown-fuse-label {
+  color: var(--danger);
+  font-weight: 700;
+}

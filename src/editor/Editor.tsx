@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Crosshair,
   Hand,
@@ -12,9 +12,10 @@ import {
 } from "lucide-react";
 import { useStore, snappedPoint } from "../core/store";
 import {
+  DEFAULT_FUSE_RATING,
   endpoint,
-  endpointKey,
   format,
+  library,
   terminal,
   wirePoints,
   type Endpoint,
@@ -28,19 +29,34 @@ import {
   moveWireSegment,
   roundedPathD,
   simplifyPoints,
-  wireCarriesCurrent,
+  wireCurrents,
+  wireTap,
+  type WireTap,
+  type WireTarget,
 } from "../core/wires";
 import { outputLook } from "../core/output";
 import { Symbol } from "./Symbol";
-type Draft = { from: Endpoint; corners: Point[]; replace?: string };
+type Draft = { from: WireTarget; corners: Point[]; replace?: string };
 export function Editor({ simulation }: { simulation: Simulation }) {
   const s = useStore(),
     svg = useRef<SVGSVGElement>(null),
     holder = useRef<HTMLDivElement>(null);
+  const currents = useMemo(
+    () => wireCurrents(s.project, simulation),
+    [s.project.wires, s.project.components, simulation],
+  );
+  const routes = useMemo(
+    () =>
+      new Map(
+        s.project.wires.map((wire) => [wire.id, wirePoints(s.project, wire)]),
+      ),
+    [s.project.wires, s.project.components, s.project.junctions],
+  );
   const [size, setSize] = useState({ w: 600, h: 600 }),
     [camera, setCamera] = useState({ x: 0, y: 0, scale: 1 });
   const [draft, setDraft] = useState<Draft | null>(null),
     [cursor, setCursor] = useState<Point>({ x: 0, y: 0 });
+  const [tapHint, setTapHint] = useState<WireTap | null>(null);
   const [box, setBox] = useState<{ from: Point; to: Point } | null>(null);
   const [context, setContext] = useState<Point | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -150,6 +166,8 @@ export function Editor({ simulation }: { simulation: Simulation }) {
       if (e.key === "Escape") {
         setContext(null);
         setDraft(null);
+        setTapHint(null);
+        wireDown.current = null;
         setBox(null);
         gesture.current = null;
       }
@@ -164,35 +182,29 @@ export function Editor({ simulation }: { simulation: Simulation }) {
       y: (e.clientY - r.top - camera.y) / camera.scale,
     };
   };
-  const finish = (to: Endpoint) => {
-    if (!draft) return;
-    if (s.project.wires.length >= 600 && !draft.replace) {
-      s.toast("This project has reached the 600-wire limit.");
+  const targetPoint = (target: WireTarget) =>
+    "wireId" in target ? target.point : endpoint(s.project, target);
+  const finish = (to: WireTarget) => {
+    if (draft && s.connect(draft.from, to, draft.corners, draft.replace)) {
       setDraft(null);
-      return;
+      setTapHint(null);
     }
-    if (endpointKey(draft.from) === endpointKey(to) && !("x" in to)) return;
-    s.change((p) => {
-      if (draft.replace)
-        p.wires = p.wires.filter((w) => w.id !== draft.replace);
-      p.wires.push({
-        id: crypto.randomUUID(),
-        from: draft.from,
-        to,
-        corners: draft.corners,
-      });
-    });
-    setDraft(null);
     wireDown.current = null;
   };
+  const begin = (from: WireTarget, down: Point | null = null) => {
+    setDraft({ from, corners: [] });
+    setCursor(targetPoint(from));
+    setTapHint(null);
+    wireDown.current = down;
+  };
+  const wiringPointer = (e: React.PointerEvent) =>
+    e.button === 0 && !e.altKey && s.tool !== "pan";
   const terminalDown = (e: React.PointerEvent, ep: Endpoint) => {
+    if (!wiringPointer(e)) return;
     e.stopPropagation();
+    setContext(null);
     if (draft) finish(ep);
-    else {
-      setDraft({ from: ep, corners: [] });
-      setCursor(endpoint(s.project, ep));
-      wireDown.current = point(e);
-    }
+    else begin(ep, point(e));
   };
   const nearestTerminal = (p: Point): Endpoint | null => {
     for (const c of s.project.components)
@@ -206,12 +218,23 @@ export function Editor({ simulation }: { simulation: Simulation }) {
         return { junctionId: j.id };
     return null;
   };
+  const connectionAt = (p: Point) =>
+    nearestTerminal(p) ??
+    wireTap(s.project, p, s.project.settings.snap, 8 / camera.scale, {
+      exclude: draft?.replace,
+      routes,
+    });
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const p = point(e);
-    const snapped = draft ? nearestTerminal(p) : null;
-    setCursor(snapped ? endpoint(s.project, snapped) : snappedPoint(p));
     const g = gesture.current;
-    if (!g) return;
+    if (!g) {
+      if (draft || s.tool === "wire") {
+        const target = connectionAt(p);
+        setTapHint(target && "wireId" in target ? target : null);
+        if (draft) setCursor(target ? targetPoint(target) : snappedPoint(p));
+      }
+      return;
+    }
     if (g.type === "pan") {
       setCamera({
         ...camera,
@@ -293,60 +316,31 @@ export function Editor({ simulation }: { simulation: Simulation }) {
       );
     gesture.current = null;
     setBox(null);
+    const p = point(e);
     if (
       draft &&
       wireDown.current &&
-      Math.hypot(
-        point(e).x - wireDown.current.x,
-        point(e).y - wireDown.current.y,
-      ) > 15
+      Math.hypot(p.x - wireDown.current.x, p.y - wireDown.current.y) *
+        camera.scale >
+        10
     ) {
-      const ep = nearestTerminal(point(e));
-      finish(ep ?? snappedPoint(point(e)));
+      finish(connectionAt(p) ?? snappedPoint(p));
     }
     wireDown.current = null;
   };
-  const clickWire = (e: React.MouseEvent, w: Wire, junction = false) => {
+  const wireDownOn = (e: React.PointerEvent, w: Wire) => {
+    if (!wiringPointer(e)) return;
     e.stopPropagation();
-    if (s.tool !== "wire" && !draft && !junction) {
+    setContext(null);
+    if (s.tool !== "wire" && !draft) {
       s.select([w.id]);
       return;
     }
-    const raw = point(e),
-      points = wirePoints(s.project, w);
-    let nearest = raw,
-      best = Infinity;
-    for (let i = 1; i < points.length; i++) {
-      const a = points[i - 1],
-        b = points[i],
-        q =
-          a.x === b.x
-            ? {
-                x: a.x,
-                y: Math.max(
-                  Math.min(a.y, b.y),
-                  Math.min(Math.max(a.y, b.y), snappedPoint(raw).y),
-                ),
-              }
-            : {
-                x: Math.max(
-                  Math.min(a.x, b.x),
-                  Math.min(Math.max(a.x, b.x), snappedPoint(raw).x),
-                ),
-                y: a.y,
-              };
-      const d = Math.hypot(raw.x - q.x, raw.y - q.y);
-      if (d < best) {
-        best = d;
-        nearest = q;
-      }
-    }
-    const ep = s.split(w, nearest);
-    if (draft) finish(ep);
-    else if (!junction) {
-      setDraft({ from: ep, corners: [] });
-      setCursor(nearest);
-    }
+    const raw = point(e);
+    const target = connectionAt(raw);
+    if (!target) return;
+    if (draft) finish(target);
+    else begin(target, raw);
   };
   const zoom = (factor: number, anchor = { x: size.w / 2, y: size.h / 2 }) =>
     setCamera((c) => {
@@ -359,7 +353,10 @@ export function Editor({ simulation }: { simulation: Simulation }) {
       };
     });
   return (
-    <div className={`schematic editor-tool-${s.tool}`} ref={holder}>
+    <div
+      className={`schematic editor-tool-${s.tool}${draft ? " wiring" : ""}`}
+      ref={holder}
+    >
       <svg
         ref={svg}
         className="schematic-svg"
@@ -367,40 +364,28 @@ export function Editor({ simulation }: { simulation: Simulation }) {
         data-testid="schematic"
         onPointerMove={onMove}
         onPointerUp={onUp}
+        onPointerLeave={() => setTapHint(null)}
         onPointerCancel={() => {
           gesture.current = null;
           wireDown.current = null;
+          setDraft(null);
+          setTapHint(null);
         }}
         onDragOver={(e) => {
           e.preventDefault();
           e.dataTransfer.dropEffect = "copy";
-          setDropTarget(hitWire(s.project, point(e))?.wire.id ?? null);
+          setDropTarget(
+            hitWire(s.project, point(e), undefined, routes)?.wire.id ?? null,
+          );
         }}
         onDragLeave={() => setDropTarget(null)}
         onDrop={(e) => {
           e.preventDefault();
           setDropTarget(null);
-          const kind = e.dataTransfer.getData("wire/component");
-          if (
-            kind &&
-            [
-              "cell",
-              "battery",
-              "lamp",
-              "led",
-              "motor",
-              "buzzer",
-              "switch",
-              "push",
-              "variable",
-              "resistor",
-              "ammeter",
-              "voltmeter",
-            ].includes(kind)
-          )
-            s.add(kind as Parameters<typeof s.add>[0], point(e), {
-              splice: true,
-            });
+          const kind = library.find(
+            (part) => part.kind === e.dataTransfer.getData("wire/component"),
+          )?.kind;
+          if (kind) s.add(kind, point(e), { splice: true });
         }}
         onPointerDown={(e) => {
           setContext(null);
@@ -414,17 +399,17 @@ export function Editor({ simulation }: { simulation: Simulation }) {
             return;
           }
           if (e.button !== 0) return;
-          const p = snappedPoint(point(e));
-          if (draft) {
-            const ep = nearestTerminal(point(e));
-            if (ep) finish(ep);
-            else setDraft({ ...draft, corners: [...draft.corners, p] });
-            return;
-          }
-          if (s.tool === "wire") {
-            setDraft({ from: p, corners: [] });
-            setCursor(p);
-            wireDown.current = p;
+          const raw = point(e);
+          if (draft || s.tool === "wire") {
+            const target = connectionAt(raw);
+            if (draft) {
+              if (target) finish(target);
+              else
+                setDraft({
+                  ...draft,
+                  corners: [...draft.corners, snappedPoint(raw)],
+                });
+            } else begin(target ?? snappedPoint(raw), raw);
             return;
           }
           s.select([]);
@@ -432,11 +417,17 @@ export function Editor({ simulation }: { simulation: Simulation }) {
           svg.current!.setPointerCapture(e.pointerId);
         }}
         onDoubleClick={(e) => {
-          if (draft) finish(snappedPoint(point(e)));
+          const p = point(e);
+          if (draft) finish(connectionAt(p) ?? snappedPoint(p));
+          else if (s.tool === "select") {
+            const hit = hitWire(s.project, p, 8 / camera.scale, routes);
+            if (hit) s.split(hit.wire, hit.point);
+          }
         }}
         onContextMenu={(e) => {
           e.preventDefault();
           setDraft(null);
+          setTapHint(null);
           setContext(null);
         }}
       >
@@ -461,35 +452,41 @@ export function Editor({ simulation }: { simulation: Simulation }) {
           transform={`translate(${camera.x} ${camera.y}) scale(${camera.scale})`}
         >
           {s.project.wires.map((w) => {
-            const points = wirePoints(s.project, w),
+            const points = routes.get(w.id)!,
               d = roundedPathD(points),
-              live =
-                s.project.settings.effects &&
-                wireCarriesCurrent(s.project, w, simulation);
+              live = s.project.settings.effects
+                ? currents.get(w.id)
+                : undefined;
             return (
               <g
                 key={w.id}
                 className={`wire ${s.selected.includes(w.id) ? "selected" : ""} ${draft?.replace === w.id ? "reconnecting" : ""} ${dropTarget === w.id ? "drop-target" : ""} ${live ? "live" : ""}`}
-                onPointerDown={(e) => clickWire(e, w)}
+                onPointerDown={(e) => wireDownOn(e, w)}
                 onContextMenu={(e) => openContext(e, w.id)}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  clickWire(e, w, true);
-                }}
               >
-                <path d={d} stroke="transparent" strokeWidth="16" fill="none" />
+                <path
+                  d={d}
+                  stroke="transparent"
+                  strokeWidth="16"
+                  vectorEffect="non-scaling-stroke"
+                  fill="none"
+                />
                 <path
                   d={d}
                   className="wire-line"
+                  pointerEvents="none"
                   fill="none"
                   strokeWidth="3"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 />
-                {live && (
+                {live !== undefined && (
                   <path
                     d={d}
                     className="wire-flow"
+                    style={{
+                      animationDirection: live < 0 ? "reverse" : "normal",
+                    }}
                     fill="none"
                     strokeWidth="3"
                     strokeLinecap="round"
@@ -519,6 +516,8 @@ export function Editor({ simulation }: { simulation: Simulation }) {
                           r="7"
                           className="wire-handle"
                           onPointerDown={(e) => {
+                            if (!wiringPointer(e) || draft || s.tool === "wire")
+                              return;
                             e.stopPropagation();
                             setDraft({
                               from: i ? w.from : w.to,
@@ -564,6 +563,8 @@ export function Editor({ simulation }: { simulation: Simulation }) {
                           r="4.5"
                           className="wire-segment-handle"
                           onPointerDown={(e) => {
+                            if (!wiringPointer(e) || draft || s.tool === "wire")
+                              return;
                             e.stopPropagation();
                             gesture.current = {
                               type: "segment",
@@ -596,7 +597,9 @@ export function Editor({ simulation }: { simulation: Simulation }) {
           {s.project.junctions.map((j) => (
             <g
               key={j.id}
+              className="junction"
               onPointerDown={(e) => {
+                if (!wiringPointer(e)) return;
                 if (draft || s.tool === "wire")
                   terminalDown(e, { junctionId: j.id });
                 else {
@@ -616,24 +619,33 @@ export function Editor({ simulation }: { simulation: Simulation }) {
                 cx={j.x}
                 cy={j.y}
                 r="4.5"
-                fill={s.selected.includes(j.id) ? "var(--green)" : "var(--ink)"}
+                className={
+                  s.selected.includes(j.id)
+                    ? "junction-dot selected"
+                    : "junction-dot"
+                }
               />
             </g>
           ))}
           {s.project.components.map((c) => {
             const selected = s.selected.includes(c.id),
-              reading = simulation.readings[c.id];
+              reading = simulation.readings[c.id],
+              blown =
+                c.kind === "fuse" && (!c.closed || reading?.fault === "fuse");
             return (
               <g
                 key={c.id}
                 data-testid={`part-${c.kind}`}
                 data-part-id={c.id}
+                data-fuse-state={
+                  c.kind === "fuse" ? (blown ? "blown" : "intact") : undefined
+                }
                 onContextMenu={(e) => openContext(e, c.id)}
                 className={`schematic-part ${selected ? "selected" : ""}`}
                 transform={`translate(${c.x} ${c.y})`}
                 tabIndex={0}
                 role="group"
-                aria-label={`${c.label}, ${c.kind === "switch" ? (c.closed ? "closed" : "open") : "component"}`}
+                aria-label={`${c.label}, ${blown ? "blown" : c.kind === "switch" ? (c.closed ? "closed" : "open") : "component"}`}
                 onFocus={() => {
                   if (!s.selected.includes(c.id)) s.select([c.id]);
                 }}
@@ -714,7 +726,7 @@ export function Editor({ simulation }: { simulation: Simulation }) {
                   />
                   <Symbol
                     kind={c.kind}
-                    closed={c.closed}
+                    closed={c.closed && !blown}
                     color={c.color}
                     look={outputLook(c.kind, reading, {
                       effects: s.project.settings.effects,
@@ -747,11 +759,7 @@ export function Editor({ simulation }: { simulation: Simulation }) {
                               terminal: t as 0 | 1,
                             };
                             if (draft) finish(ep);
-                            else {
-                              setDraft({ from: ep, corners: [] });
-                              setCursor(terminal(c, t as 0 | 1));
-                              wireDown.current = null;
-                            }
+                            else begin(ep);
                           }
                         }}
                         onPointerDown={(e) =>
@@ -771,6 +779,43 @@ export function Editor({ simulation }: { simulation: Simulation }) {
                     );
                   })}
                 </g>
+                {s.project.settings.effects && reading?.fault && (
+                  <g
+                    className="schematic-fault"
+                    data-fault={reading.fault}
+                    aria-hidden="true"
+                    transform="translate(0 -30)"
+                  >
+                    {reading.fault !== "fuse" && (
+                      <g className="fault-flame">
+                        <path
+                          fill="#df4b34"
+                          d="M0 7C-15 8-21-4-15-15c0 7 6 8 7 2 1-6 9-8 7-21 9 7 6 17 11 19 3 0 4-5 4-7C26-4 14 8 0 7Z"
+                        />
+                        <path
+                          fill="#ffbc58"
+                          d="M0 5c-6 0-8-4-4-10 0 4 5 3 5-1 3-3 4-5 3-8C11-5 8 5 0 5Z"
+                        />
+                      </g>
+                    )}
+                    {reading.fault !== "overheat" && (
+                      <g className="fault-burst">
+                        <circle
+                          r="26"
+                          fill="none"
+                          stroke="#ed9d43"
+                          strokeWidth="2"
+                        />
+                        <path
+                          d="M-29-8l-9-9m56 4l12-12M-24 6l-13 3m61-3l11 5M-10-28l-4-10M10-29l3-11"
+                          stroke="#ed782e"
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                        />
+                      </g>
+                    )}
+                  </g>
+                )}
                 <text textAnchor="middle" y="58" className="component-label">
                   {c.label}
                 </text>
@@ -779,17 +824,32 @@ export function Editor({ simulation }: { simulation: Simulation }) {
                     ? format(c.voltage, "V")
                     : c.kind === "lamp"
                       ? `${format(c.nominalVoltage, "V")} · ${format(c.nominalPower, "W")}`
-                      : c.kind === "resistor" || c.kind === "variable"
+                      : c.kind === "resistor" ||
+                          c.kind === "variable" ||
+                          c.kind === "inductor"
                         ? format(c.resistance, "Ω")
-                        : c.kind === "ammeter"
-                          ? format(Math.abs(reading?.current ?? 0), "A")
-                          : c.kind === "voltmeter"
-                            ? format(Math.abs(reading?.voltage ?? 0), "V")
-                            : c.kind === "switch" || c.kind === "push"
-                              ? c.closed
-                                ? "Closed"
-                                : "Open"
-                              : ""}
+                        : c.kind === "diode"
+                          ? format(c.forwardVoltage, "V")
+                          : c.kind === "fuse"
+                            ? !blown
+                              ? format(
+                                  c.ratedCurrent ?? DEFAULT_FUSE_RATING,
+                                  "A",
+                                )
+                              : "Blown"
+                            : c.kind === "ammeter"
+                              ? reading
+                                ? format(Math.abs(reading.current), "A")
+                                : "—"
+                              : c.kind === "voltmeter"
+                                ? reading
+                                  ? format(Math.abs(reading.voltage), "V")
+                                  : "—"
+                                : c.kind === "switch" || c.kind === "push"
+                                  ? c.closed
+                                    ? "Closed"
+                                    : "Open"
+                                  : ""}
                 </text>
               </g>
             );
@@ -799,7 +859,7 @@ export function Editor({ simulation }: { simulation: Simulation }) {
               d={roundedPathD(
                 wirePoints(s.project, {
                   id: "preview",
-                  from: draft.from,
+                  from: "wireId" in draft.from ? draft.from.point : draft.from,
                   to: cursor,
                   corners: draft.corners,
                 }),
@@ -809,6 +869,22 @@ export function Editor({ simulation }: { simulation: Simulation }) {
               strokeWidth="3"
               strokeLinecap="round"
               strokeLinejoin="round"
+            />
+          )}
+          {draft && "wireId" in draft.from && (
+            <circle
+              className="wire-tap wire-tap-origin"
+              cx={draft.from.point.x}
+              cy={draft.from.point.y}
+              r={5 / camera.scale}
+            />
+          )}
+          {tapHint && (draft || s.tool === "wire") && (
+            <circle
+              className="wire-tap"
+              cx={tapHint.point.x}
+              cy={tapHint.point.y}
+              r={6 / camera.scale}
             />
           )}
           {box && (
@@ -917,9 +993,9 @@ export function Editor({ simulation }: { simulation: Simulation }) {
       </div>
       <div className="canvas-hint">
         {draft
-          ? "Click a terminal to connect · click to add a bend · double-click to stop · Esc to cancel"
+          ? "Connect to a terminal or wire · click the grid for bends · Esc to cancel"
           : s.tool === "wire"
-            ? "Click terminals to connect them · click a wire to add a join"
+            ? "Click or drag from a terminal or wire"
             : "Drag to move · drop a part onto a wire to add it in the line"}
       </div>
     </div>

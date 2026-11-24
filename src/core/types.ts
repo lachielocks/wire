@@ -3,6 +3,10 @@ export type Kind =
   | "battery"
   | "lamp"
   | "led"
+  | "diode"
+  | "capacitor"
+  | "fuse"
+  | "inductor"
   | "buzzer"
   | "motor"
   | "switch"
@@ -24,6 +28,7 @@ export type Part = Point & {
   closed: boolean;
   color: string;
   forwardVoltage: number;
+  ratedCurrent?: number;
 };
 export type Endpoint =
   { componentId: string; terminal: 0 | 1 } | { junctionId: string } | Point;
@@ -61,6 +66,8 @@ export type Reading = {
   current: number;
   power: number;
   brightness: number;
+  floatingVoltage?: boolean;
+  fault?: "overheat" | "burst" | "fuse";
 };
 export type Simulation = {
   status: "complete" | "open" | "short" | "error";
@@ -68,9 +75,11 @@ export type Simulation = {
   readings: Record<string, Reading>;
   warnings: string[];
   sourceCurrent: number;
+  trippedFuses?: string[];
   nodeVoltages: Record<string, number>;
 };
 export const GRID = 20;
+export const DEFAULT_FUSE_RATING = 0.5;
 export const uid = () => crypto.randomUUID();
 export const snap = (n: number, enabled = true) =>
   enabled ? Math.round(n / GRID) * GRID : n;
@@ -114,6 +123,20 @@ export const library: {
     group: "Controls",
     detail: "10–1,000 Ω",
   },
+  { kind: "fuse", name: "Fuse", group: "Parts", detail: "0.5 A protection" },
+  {
+    kind: "diode",
+    name: "Diode",
+    group: "Parts",
+    detail: "0.7 V forward drop",
+  },
+  {
+    kind: "capacitor",
+    name: "Capacitor",
+    group: "Parts",
+    detail: "Blocks steady DC",
+  },
+  { kind: "inductor", name: "Inductor", group: "Parts", detail: "1 Ω winding" },
   { kind: "resistor", name: "Resistor", group: "Parts", detail: "100 Ω" },
   {
     kind: "ammeter",
@@ -137,12 +160,13 @@ export function makePart(kind: Kind, x: number, y: number): Part {
     label: library.find((p) => p.kind === kind)!.name,
     rotation: 0,
     voltage: kind === "battery" ? 4.5 : 1.5,
-    resistance: kind === "motor" ? 12 : kind === "buzzer" ? 100 : 100,
+    resistance: kind === "motor" ? 12 : kind === "inductor" ? 1 : 100,
     nominalVoltage: 1.5,
     nominalPower: 0.3,
-    closed: false,
+    closed: kind === "fuse",
+    ...(kind === "fuse" ? { ratedCurrent: DEFAULT_FUSE_RATING } : {}),
     color: "#ee564a",
-    forwardVoltage: 2,
+    forwardVoltage: kind === "diode" ? 0.7 : 2,
   };
 }
 export function terminal(part: Part, t: 0 | 1): Point {
@@ -358,6 +382,22 @@ export function routeOrthogonal(
   boxes: { minX: number; maxX: number; minY: number; maxY: number }[],
   avoid: Point[],
 ): Point[] {
+  if (
+    !endDir &&
+    startDir &&
+    Math.hypot(to.x - from.x, to.y - from.y) <= STUB &&
+    (to.x - from.x) * startDir.y === (to.y - from.y) * startDir.x &&
+    (to.x - from.x) * startDir.x + (to.y - from.y) * startDir.y > 0
+  )
+    return [from, to];
+  if (
+    endDir &&
+    !startDir &&
+    Math.hypot(to.x - from.x, to.y - from.y) <= STUB &&
+    (from.x - to.x) * endDir.y === (from.y - to.y) * endDir.x &&
+    (from.x - to.x) * endDir.x + (from.y - to.y) * endDir.y > 0
+  )
+    return [from, to];
   const start = startDir ? addPoint(from, startDir, STUB) : from,
     end = endDir ? addPoint(to, endDir, STUB) : to,
     prefix = startDir ? [from, start] : [from],
@@ -518,9 +558,9 @@ export function example(
 export function format(n: number, unit: string) {
   if (!Number.isFinite(n)) return "—";
   const v = Math.abs(n);
-  return v > 0 && v < 0.001
-    ? `${(n * 1e6).toFixed(1)} µ${unit}`
-    : v > 0 && v < 1 && unit === "A"
-      ? `${(n * 1000).toFixed(1)} m${unit}`
-      : `${n.toFixed(v >= 100 ? 0 : 2).replace(/\.00$/, "")} ${unit}`;
+  if (v > 0 && v < 1e-6) return `${(n * 1e9).toFixed(1)} n${unit}`;
+  if (v > 0 && v < 0.001) return `${(n * 1e6).toFixed(1)} µ${unit}`;
+  if (v > 0 && (v < 0.01 || (v < 1 && unit === "A")))
+    return `${(n * 1000).toFixed(1)} m${unit}`;
+  return `${n.toFixed(v >= 100 ? 0 : 2).replace(/\.00$/, "")} ${unit}`;
 }

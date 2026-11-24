@@ -144,3 +144,72 @@ test("names an unconnected motor terminal in the status bar", async ({
     page.locator(`[data-terminal="${motor}:1"][data-open="true"]`),
   ).toBeVisible();
 });
+
+test("trips and replaces a fuse and renders overload in both views", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await blank(page);
+  for (const component of [
+    "Battery",
+    "Fuse",
+    "Bulb",
+    "Diode",
+    "Capacitor",
+    "Inductor",
+  ]) {
+    await page
+      .getByRole("button", { name: "Add " + component, exact: true })
+      .click();
+  }
+  const [battery, fuse, bulb] = await Promise.all(
+    ["battery", "fuse", "lamp"].map((kind) => id(page, kind)),
+  );
+  await connect(page, `${battery}:1`, `${fuse}:0`);
+  await connect(page, `${fuse}:1`, `${bulb}:0`);
+  await connect(page, `${bulb}:1`, `${battery}:0`);
+  await page.getByTestId("part-fuse").click();
+  await expect(page.getByText("Fuse blown", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("reading-current")).toHaveText("0 A");
+  await expect(page.getByTestId("simulation-status")).toHaveText(
+    "Open circuit",
+  );
+  const flame = page.locator('[data-testid="part-lamp"] .fault-flame');
+  const fuse2D = page.getByTestId("part-fuse");
+  await expect(fuse2D).toHaveAttribute("data-fuse-state", "blown");
+  await expect(fuse2D.getByText("Blown", { exact: true })).toBeVisible();
+  await expect(flame).toHaveCount(0);
+  await page.getByRole("button", { name: "3D view", exact: true }).click();
+  const fuse3D = page.locator('.physical-label[data-fuse-state="blown"]');
+  await expect(fuse3D.getByText("Blown", { exact: true })).toBeVisible();
+  await page.screenshot({ path: `${shots}/blown-fuse-3d.png` });
+
+  await page.getByRole("button", { name: "2D view", exact: true }).click();
+  await page.getByTestId("part-battery").click();
+  await page.getByLabel("Voltage", { exact: true }).fill("1.5");
+  await fuse2D.click();
+  await page.getByLabel("Current rating", { exact: true }).fill("1");
+  await page.getByRole("button", { name: "Replace fuse" }).click();
+  await expect(fuse2D).toHaveAttribute("data-fuse-state", "intact");
+  await expect(page.getByTestId("reading-current")).toHaveText("197.1 mA");
+  await page.getByTestId("part-battery").click();
+  await page.getByLabel("Voltage", { exact: true }).fill("4.5");
+  await expect(fuse2D).toHaveAttribute("data-fuse-state", "blown");
+  await expect(flame).toHaveCount(0);
+
+  await fuse2D.click();
+  await page.getByRole("button", { name: /^Delete component/ }).click();
+  await connect(page, `${battery}:1`, `${bulb}:0`);
+  await expect(flame).toBeVisible();
+  await expect(flame).toHaveCSS("animation-name", "fault-flicker");
+  await page.screenshot({ path: `${shots}/overload-2d.png` });
+  await page.getByRole("button", { name: "3D view", exact: true }).click();
+  await expect(page.getByTestId("experiment-canvas")).toBeVisible();
+  await expect(
+    page.locator(".physical-label").filter({ hasText: "BulbOverload" }),
+  ).toBeVisible();
+  await page.screenshot({ path: `${shots}/overload-3d.png` });
+  expect(errors).toEqual([]);
+});

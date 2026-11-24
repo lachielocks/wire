@@ -15,7 +15,7 @@ import {
   roundedPathD,
   simplifyPoints,
   spliceComponentIntoWire,
-  wireCarriesCurrent,
+  wireCurrents,
 } from "./wires";
 
 function seriesCellLamp() {
@@ -125,8 +125,8 @@ describe("splice into a wire", () => {
   it("marks only current-carrying wires as live", () => {
     const { p, top, bottom } = seriesCellLamp();
     const sim = solve(p);
-    expect(wireCarriesCurrent(p, top, sim)).toBe(true);
-    expect(wireCarriesCurrent(p, bottom, sim)).toBe(true);
+    expect(wireCurrents(p, sim).has(top.id)).toBe(true);
+    expect(wireCurrents(p, sim).has(bottom.id)).toBe(true);
     const dangling: Wire = {
       id: uid(),
       from: { componentId: p.components[0].id, terminal: 1 },
@@ -134,7 +134,7 @@ describe("splice into a wire", () => {
       corners: [],
     };
     p.wires.push(dangling);
-    expect(wireCarriesCurrent(p, dangling, solve(p))).toBe(false);
+    expect(wireCurrents(p, solve(p)).has(dangling.id)).toBe(false);
   });
 });
 

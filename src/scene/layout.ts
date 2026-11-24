@@ -9,6 +9,7 @@ export const world = (p: Point): [number, number, number] => [
   0.05,
   (p.y - 270) / 85,
 ];
+export const JUNCTION_HEIGHT = 0.11;
 export type Placement = {
   sourceX: number;
   sourceY: number;
@@ -61,11 +62,21 @@ export function sceneEndpoint(
   layout?: Layout,
 ): [number, number, number] {
   const p = world(endpoint(c, ep));
-  if ("componentId" in ep && layout?.has(ep.componentId)) {
-    const part = c.components.find((p) => p.id === ep.componentId)!;
-    const raw = world(part),
-      placed = layout.get(part.id)!.position;
-    return [p[0] + placed[0] - raw[0], 0.3, p[2] + placed[2] - raw[2]];
+  if ("componentId" in ep) {
+    const part = c.components.find((p) => p.id === ep.componentId);
+    const placement = layout?.get(ep.componentId);
+    if (part && placement) {
+      const raw = world(part);
+      return [
+        p[0] + placement.position[0] - raw[0],
+        0.3,
+        p[2] + placement.position[2] - raw[2],
+      ];
+    }
   }
-  return [p[0], 0.3, p[2]];
+  return [
+    p[0],
+    "junctionId" in ep ? JUNCTION_HEIGHT : "componentId" in ep ? 0.3 : 0.06,
+    p[2],
+  ];
 }

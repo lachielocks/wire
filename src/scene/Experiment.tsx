@@ -15,31 +15,47 @@ import type { OrbitControls as OrbitControlsType } from "three-stdlib";
 import { useStore } from "../core/store";
 import { outputLook } from "../core/output";
 import {
+  type Circuit,
   type Simulation,
   type Wire,
   endpoint,
   wirePoints,
 } from "../core/types";
-import { generateLayout, sceneEndpoint, world, type Layout } from "./layout";
+import {
+  generateLayout,
+  JUNCTION_HEIGHT,
+  sceneEndpoint,
+  world,
+  type Layout,
+} from "./layout";
 import { PhysicalPart } from "./Models";
 import { WoodenTable } from "./Wood";
 function Cable({
+  circuit,
   wire,
   index,
   layout,
 }: {
+  circuit: Circuit;
   wire: Wire;
   index: number;
   layout: Layout;
 }) {
-  const circuit = useStore((s) => s.project);
   const curve = useMemo(() => {
-    const anchors = wirePoints(circuit, wire).map((p, i, all) => {
-      if (i === 0) return sceneEndpoint(circuit, wire.from, layout);
-      if (i === all.length - 1) return sceneEndpoint(circuit, wire.to, layout);
-      const q = world(p);
-      return [q[0], 0.06, q[2]] as [number, number, number];
-    });
+    const points = wirePoints(circuit, wire);
+    const anchors =
+      points.length < 2
+        ? [
+            sceneEndpoint(circuit, wire.from, layout),
+            sceneEndpoint(circuit, wire.to, layout),
+          ]
+        : points.map((p, i, all) => {
+            if (i === 0) return sceneEndpoint(circuit, wire.from, layout);
+            if (i === all.length - 1)
+              return sceneEndpoint(circuit, wire.to, layout);
+            const q = world(p);
+            return [q[0], 0.06, q[2]] as [number, number, number];
+          });
     const vectors: THREE.Vector3[] = [];
     anchors.forEach((p, i) => {
       if (i) {
@@ -102,7 +118,7 @@ function Camera({ reset, layout }: { reset: number; layout: Layout }) {
             Math.max(...points.map((p) => p.z))) /
           2
         : 0;
-    const center = new THREE.Vector3(x, 0.1, z),
+    const center = new THREE.Vector3(x, -0.23, z),
       direction = new THREE.Vector3(0.9, 1.1, 1.35).normalize();
     const right = new THREE.Vector3()
         .crossVectors(new THREE.Vector3(0, 1, 0), direction)
@@ -211,9 +227,16 @@ export function Experiment({
     cache.current = generateLayout(s.project, cache.current);
     return cache.current;
   }, [s.project.id, s.project.components]);
-  const reduceMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [reduceMotion, setReduceMotion] = useState(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = (event: MediaQueryListEvent) =>
+      setReduceMotion(event.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const effects = s.project.settings.effects && !reduceMotion;
   const liveMotion = s.project.components.some((c) => {
     const look = outputLook(c.kind, simulation.readings[c.id], {
@@ -256,15 +279,31 @@ export function Experiment({
             <WoodenTable />
 
             {s.project.wires.map((w, i) => (
-              <Cable key={w.id} wire={w} index={i} layout={layout} />
+              <Cable
+                key={w.id}
+                circuit={s.project}
+                wire={w}
+                index={i}
+                layout={layout}
+              />
             ))}
             {s.project.junctions.map((j) => {
               const p = world(j);
               return (
-                <mesh key={j.id} position={[p[0], 0.26, p[2]]}>
-                  <sphereGeometry args={[0.055, 12, 8]} />
-                  <meshStandardMaterial color="#b59d65" metalness={0.7} />
-                </mesh>
+                <group key={j.id} position={[p[0], JUNCTION_HEIGHT, p[2]]}>
+                  <mesh castShadow>
+                    <cylinderGeometry args={[0.082, 0.095, 0.095, 20]} />
+                    <meshStandardMaterial
+                      color="#b59d65"
+                      roughness={0.32}
+                      metalness={0.68}
+                    />
+                  </mesh>
+                  <mesh position={[0, 0.049, 0]}>
+                    <boxGeometry args={[0.08, 0.004, 0.012]} />
+                    <meshStandardMaterial color="#524737" />
+                  </mesh>
+                </group>
               );
             })}
             {s.project.components.map((c) => (
@@ -275,6 +314,7 @@ export function Experiment({
                 reading={simulation.readings[c.id]}
                 selected={s.selected.includes(c.id)}
                 effects={effects}
+                showFaults={s.project.settings.effects}
                 onSelect={() => s.select([c.id])}
                 onToggle={() => s.update(c.id, { closed: !c.closed })}
               />

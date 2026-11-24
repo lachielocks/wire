@@ -7,9 +7,18 @@ const database = () =>
       db.createObjectStore("recovery");
     },
   });
-export async function saveProject(p: Project) {
+export async function saveProject(p: Project, recoverOnReload = false) {
   const db = await database();
-  await db.put("projects", structuredClone(p));
+  if (!recoverOnReload) {
+    await db.put("projects", p);
+    return;
+  }
+  const tx = db.transaction(["projects", "recovery"], "readwrite");
+  await Promise.all([
+    tx.objectStore("projects").put(p),
+    tx.objectStore("recovery").put(p, "latest"),
+    tx.done,
+  ]);
 }
 export async function listProjects(): Promise<Project[]> {
   const db = await database();
@@ -97,6 +106,8 @@ export function validateProject(value: unknown): Project {
       c.nominalPower <= 0 ||
       c.nominalVoltage <= 0 ||
       c.forwardVoltage <= 0 ||
+      (c.ratedCurrent !== undefined &&
+        (!finite(c.ratedCurrent) || c.ratedCurrent <= 0)) ||
       typeof c.closed !== "boolean" ||
       !/^#[0-9a-f]{6}$/i.test(c.color)
     )

@@ -109,6 +109,19 @@ export default function App() {
   }, []);
   const toast = s.toast;
   useEffect(() => {
+    if (
+      !simulation.trippedFuses?.length ||
+      useStore.getState().project !== s.project
+    )
+      return;
+    const tripped = new Set(simulation.trippedFuses);
+    s.change((project) => {
+      for (const part of project.components) {
+        if (tripped.has(part.id)) part.closed = false;
+      }
+    }, false);
+  }, [simulation, s.project, s.change]);
+  useEffect(() => {
     const rev = useStore.getState().revision;
     recover()
       .then((p) => {
@@ -127,6 +140,7 @@ export default function App() {
   useEffect(() => {
     if (!ready) return;
     const timer = setTimeout(() => {
+      if (useStore.getState().project !== s.project) return;
       autosave(s.project).catch(() =>
         toast(
           "Couldn’t autosave locally. Export a project file to keep your work.",
@@ -167,7 +181,7 @@ export default function App() {
     const state = useStore.getState();
     setSaving(true);
     try {
-      await saveProject(state.project);
+      await saveProject(state.project, true);
       state.saved(state.revision);
       toast("Saved on this device");
     } catch {
@@ -579,7 +593,7 @@ export default function App() {
                 {simulation.status === "complete"
                   ? "Circuit complete"
                   : simulation.status === "short"
-                    ? "Short circuit"
+                    ? "Short / overload"
                     : simulation.status === "error"
                       ? "Check your circuit"
                       : "Open circuit"}
@@ -607,7 +621,7 @@ export default function App() {
                 </button>
               )}
               {simulation.sourceCurrent > 0 && (
-                <span title="Sum of source-current magnitudes">
+                <span title="Sum of source-current magnitudes across all cells and batteries">
                   {format(simulation.sourceCurrent, "A")}
                 </span>
               )}
@@ -1068,24 +1082,27 @@ export default function App() {
               </ol>
               <h3>Joins and branches</h3>
               <p>
-                In the wire tool, click a wire to add a join and start a branch.
-                Double-click a wire with the select tool to add a join dot.
-                Wires that cross without a dot stay separate. Select a wire to
-                drag its ends, bends, or segments.
+                Choose the Wire tool and click or drag from an existing wire.
+                Connect to a terminal or to the highlighted point on another
+                wire. A dot marks the new junction. Double-click a wire with the
+                Select tool to add a junction by itself.
               </p>
               <h3>How the numbers work</h3>
               <p>
-                Wire uses DC modified nodal analysis. Sources include 0.1 Ω
-                internal resistance. Bulbs have constant resistance R = V²/P;
-                brightness follows P/P-rated. Closed switches and ammeters are
-                0.01 Ω. Voltmeters are 1 GΩ.
+                Wire uses DC nodal analysis. Sources include 0.1 Ω internal
+                resistance. Bulbs have constant resistance R = V²/P; brightness
+                follows P/P-rated. Closed switches and ammeters are 0.01 Ω.
+                Voltmeters are 1 GΩ.
               </p>
               <p>
                 LEDs use a forward drop plus 10 Ω, with polarity and overcurrent
                 warnings. Motors and buzzers are resistive approximations. Fan
                 speed is illustrative; the buzzer activates above 1 V and 5 mA.
-                Real filament heating, transients, AC, torque, and component
-                damage are not simulated.
+                Capacitors block steady DC. Inductors use winding resistance.
+                Fuses open above their rating or when opening protects an
+                overloaded light. Replace a blown fuse in Properties. Sparks and
+                flames illustrate overloads. The solver uses steady DC and omits
+                heating, transients and AC.
               </p>
             </div>
             <div>

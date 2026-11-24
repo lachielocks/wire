@@ -83,12 +83,12 @@ describe("editor and state", () => {
     s.load(example());
     const before = solve(useStore.getState().project).sourceCurrent,
       w = useStore.getState().project.wires[0];
-    const ep = s.split(w, { x: 360, y: 160 }),
-      p = useStore.getState().project;
+    s.split(w, { x: 360, y: 160 });
+    const p = useStore.getState().project;
     expect(p.junctions).toHaveLength(1);
     expect(p.wires).toHaveLength(4);
     expect(solve(p).sourceCurrent).toBeCloseTo(before, 8);
-    expect("junctionId" in ep).toBe(true);
+    expect(p.junctions[0]).toMatchObject({ x: 360, y: 160 });
   });
   it("both representations use identical terminals and switch state", () => {
     const p = example(),

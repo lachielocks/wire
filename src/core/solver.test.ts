@@ -16,7 +16,7 @@ function loop(kinds: Kind[], voltage = 3) {
 }
 const reading = (kind: Kind, p: ReturnType<typeof loop>) =>
   solve(p).readings[p.components.find((p) => p.kind === kind)!.id];
-describe("DC modified nodal analysis", () => {
+describe("DC nodal analysis", () => {
   it("solves the cell-switch-lamp example using Ohm’s law", () => {
     const p = example(),
       r = solve(p);
@@ -257,5 +257,151 @@ describe("unconnected terminal hints", () => {
       r.warnings.some((w) => w.includes("Motor's right side isn't connected")),
     ).toBe(true);
     expect(r.message).toContain("Circuit isn't complete");
+  });
+});
+
+describe("mixed circuits and protection", () => {
+  it("agrees with Kirchhoff's laws for a loaded voltage divider", () => {
+    const p = loop(["battery", "resistor", "resistor"], 9);
+    const [supply, series, load] = p.components;
+    series.resistance = 100;
+    load.resistance = 200;
+    const branch = makePart("resistor", 0, 200);
+    branch.resistance = 300;
+    p.components.push(branch);
+    for (const terminal of [0, 1] as const) {
+      p.wires.push({
+        id: uid(),
+        from: { componentId: load.id, terminal },
+        to: { componentId: branch.id, terminal },
+        corners: [],
+      });
+    }
+    const result = solve(p);
+    const current = 9 / (0.1 + 100 + 120);
+    const [source, first, second, third] = p.components.map(
+      (part) => result.readings[part.id],
+    );
+    expect(result.status).toBe("complete");
+    expect(Math.abs(first.current)).toBeCloseTo(current, 10);
+    expect(second.voltage).toBeCloseTo(third.voltage, 10);
+    expect(Math.abs(second.voltage)).toBeCloseTo(current * 120, 10);
+    expect(Math.abs(second.current) + Math.abs(third.current)).toBeCloseTo(
+      Math.abs(first.current),
+      10,
+    );
+    expect(Math.abs(source.voltage)).toBeCloseTo(
+      supply.voltage - current * 0.1,
+      10,
+    );
+    expect(source.power + first.power + second.power + third.power).toBeCloseTo(
+      0,
+      10,
+    );
+  });
+
+  it("solves forward branches with different diode knees", () => {
+    const p = loop(["battery", "resistor", "diode"], 3);
+    const [, resistor, diode] = p.components;
+    resistor.resistance = 100;
+    const led = makePart("led", 240, 160);
+    p.components.push(led);
+    for (const wire of p.wires) {
+      for (const end of [wire.from, wire.to]) {
+        if ("componentId" in end && end.componentId === diode.id)
+          end.terminal = end.terminal === 0 ? 1 : 0;
+      }
+    }
+    for (const terminal of [0, 1] as const) {
+      p.wires.push({
+        id: uid(),
+        from: { componentId: diode.id, terminal },
+        to: { componentId: led.id, terminal },
+        corners: [],
+      });
+    }
+    const result = solve(p);
+    expect(result.status).toBe("complete");
+    expect(result.readings[diode.id].current).toBeCloseTo((3 - 0.7) / 102.1, 9);
+    expect(result.readings[led.id].voltage).toBeCloseTo(
+      result.readings[diode.id].voltage,
+      10,
+    );
+    expect(result.readings[led.id].current).toBeLessThan(1e-9);
+  });
+
+  it("reports a capacitor's voltage and blocks its branch at steady DC", () => {
+    const p = loop(["battery", "capacitor"], 3);
+    const result = solve(p);
+    expect(result.status).toBe("open");
+    expect(result.sourceCurrent).toBe(0);
+    expect(Math.abs(reading("capacitor", p).voltage)).toBeCloseTo(3, 10);
+    expect(reading("capacitor", p).current).toBe(0);
+    p.wires.pop();
+    expect(reading("capacitor", p).floatingVoltage).toBe(true);
+  });
+
+  it("models an inductor's winding and a fuse below its current rating", () => {
+    const p = loop(["battery", "inductor", "resistor", "fuse"], 3);
+    p.components[2].resistance = 10;
+    const result = solve(p);
+    expect(result.status).toBe("complete");
+    expect(result.trippedFuses).toBeUndefined();
+    expect(result.sourceCurrent).toBeCloseTo(3 / 11.11, 10);
+    expect(Math.abs(reading("inductor", p).voltage)).toBeCloseTo(3 / 11.11, 10);
+  });
+
+  it("re-solves after opening a fuse and limits the trip to the overloaded branch", () => {
+    const p = loop(["battery", "inductor", "fuse"], 3);
+    const [battery, , fuse] = p.components;
+    const load = makePart("resistor", 0, 200);
+    p.components.push(load);
+    for (const terminal of [0, 1] as const) {
+      p.wires.push({
+        id: uid(),
+        from: { componentId: battery.id, terminal },
+        to: { componentId: load.id, terminal },
+        corners: [],
+      });
+    }
+    const result = solve(p);
+    expect(result.trippedFuses).toEqual([fuse.id]);
+    expect(result.readings[fuse.id]).toMatchObject({
+      current: 0,
+      fault: "fuse",
+    });
+    expect(result.sourceCurrent).toBeCloseTo(3 / 100.1, 10);
+    expect(result.status).toBe("complete");
+    expect(fuse.closed).toBe(true);
+    fuse.closed = false;
+    expect(solve(p).trippedFuses).toBeUndefined();
+  });
+
+  it("stops a protected bulb overload while leaving a separate fuse intact", () => {
+    const protectedLoop = loop(["battery", "lamp", "fuse"], 4.5);
+    const [, bulb, protector] = protectedLoop.components;
+    protector.ratedCurrent = 1;
+    const separate = loop(["cell", "resistor", "fuse"], 1.5);
+    const otherFuse = separate.components[2];
+    const result = solve({
+      components: [...protectedLoop.components, ...separate.components],
+      wires: [...protectedLoop.wires, ...separate.wires],
+      junctions: [],
+    });
+    expect(result.trippedFuses).toEqual([protector.id]);
+    expect(result.readings[bulb.id]).toMatchObject({ current: 0, power: 0 });
+    expect(result.readings[bulb.id].fault).toBeUndefined();
+    expect(result.readings[otherFuse.id].fault).toBeUndefined();
+
+    const unprotected = loop(["battery", "lamp"], 4.5);
+    const independent = solve({
+      components: [...unprotected.components, ...separate.components],
+      wires: [...unprotected.wires, ...separate.wires],
+      junctions: [],
+    });
+    expect(independent.trippedFuses).toBeUndefined();
+    expect(independent.readings[unprotected.components[1].id].fault).toBe(
+      "burst",
+    );
   });
 });

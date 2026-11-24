@@ -47,9 +47,10 @@ bulb, two bulbs in series, or two bulbs in parallel.
 5. Select a component to edit its values and see its simulated voltage, current,
    power, and lamp brightness.
 
-**Branches:** in the wire tool, click an existing wire to add a join and start or
-finish a branch. In the select tool, double-click a wire to add a join. A visible
-dot means an explicit connection. Plain wire crossings never connect.
+**Branches:** choose the Wire tool (W), then click or drag from an existing wire.
+While drawing, click or drop onto a terminal or a highlighted point on another
+wire. A dot marks the new junction. Plain crossings stay separate. Double-click
+with the Select tool to place a junction by itself.
 
 **Editing:** select a wire to show its ends, bends and segment handles. Drag an
 end to reconnect it; drag a bend or a segment to reshape it. Wires use rounded
@@ -91,7 +92,7 @@ and system themes. It keeps the 2D editor and solver usable if WebGL fails.
 
 ## Electrical models
 
-The engine uses **DC modified nodal analysis**, with explicit graph connectivity,
+The engine uses **DC nodal analysis**, with explicit graph connectivity,
 pivoted Gaussian elimination, and an active-set piecewise-linear LED model.
 Wires merge explicit endpoint nodes using union-find. Geometric overlap plays
 no part in the connectivity calculation. Each isolated electrical island has its
@@ -104,19 +105,29 @@ own voltage reference; there is no implicit common ground between islands.
 | Switch / push button | Open: branch omitted. Closed: 0.01 Ω. |
 | Fixed / variable resistor | Linear, editable resistance. Variable resistor also has a 10–1,000 Ω slider. |
 | LED | Forward voltage (default 2 V) plus 10 Ω dynamic resistance. Reverse/off conductance 1e−10 S. Brightness rises to 20 mA. External series resistor is required to limit current. Warns above 30 mA and for reverse polarity. |
+| Diode | Adjustable 0.7 V forward drop by default, with 2 Ω dynamic resistance and the same small off-state conductance as an LED. |
+| Capacitor | Open after settling in DC. Terminal voltage is available when both terminals have a shared reference. |
+| Inductor | Winding resistance at steady DC, adjustable from the default 1 Ω. |
+| Fuse | 0.01 Ω while intact. Opens immediately above its adjustable current rating, 0.5 A by default. Use Replace fuse in the inspector after correcting an overload. |
 | Motor | Editable resistor, default 12 Ω. Fan direction follows signed branch current; speed scales with current and is capped. |
 | Buzzer | Editable resistor, default 100 Ω. Activates above 1 V and 5 mA. A quiet 440 Hz tone plays only after audio is enabled in Settings. |
 | Ammeter | 0.01 Ω shunt; measures signed branch current, displayed as magnitude. Insert in series. |
 | Voltmeter | 1 GΩ input resistance; measures terminal potential difference. Connect in parallel. |
 
 All UI measurements are finite solver outputs; failed calculations show an
-explanation instead of fabricated measurements. LED active-set non-convergence
-is reported. Invalid parameters, unconnected terminals, reversed LEDs, excessive
+explanation instead of fabricated measurements. Diode convergence failures are reported. Invalid parameters, unconnected terminals, reversed LEDs, excessive
 LED current, lamp overload and source shorts are explained. A source with merged
 terminals or current above 5 A is flagged as a short/excessive-current condition.
 The status bar displays the sum of source-current magnitudes (not the current in
 a particular branch when multiple sources are present). The 5 A threshold is an educational warning threshold, not a device protection
 rating. Ordinary open and unfinished circuits are normal editing states.
+
+Severe overloads show an animated burst and flame in the schematic and 3D
+workbench. Visual effects follow the project setting and reduced-motion
+preference. Fuses open the electrical circuit and stay blown until replaced. Wire also
+trips a fuse below its rating if opening it clears an overload in a bulb or
+LED it protects. A broken link and a red **Blown** label mark the fuse in
+both views. Other overloads show warnings and effects while the DC model keeps solving.
 
 ### Manually checked reference results
 
@@ -174,7 +185,7 @@ manual 3D rearrangement and a physically accurate wire-tangle solver are omitted
 src/
   core/types.ts          Circuit/project format, library defaults, geometry
   core/store.ts          Authoritative state, editing, selection, undo/redo
-  core/solver.ts         Connectivity and modified nodal analysis
+  core/solver.ts         Connectivity and DC nodal analysis
   core/persistence.ts    IndexedDB, recovery, project validation
   core/export.tsx        Standalone SVG, PNG and WebGL downloads (lazy-loaded)
   editor/Editor.tsx      SVG editor, terminals, wires, gestures and camera

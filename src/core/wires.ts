@@ -28,18 +28,187 @@ export function projectOnSegment(p: Point, a: Point, b: Point) {
   return { point, t, dist: Math.hypot(p.x - point.x, p.y - point.y) };
 }
 
-export function hitWire(circuit: Circuit, p: Point, threshold = WIRE_HIT) {
-  let best: { wire: Wire; point: Point; dist: number; index: number } | null =
-    null;
-  for (const w of circuit.wires) {
-    const pts = wirePoints(circuit, w);
+export function hitWire(
+  circuit: Circuit,
+  p: Point,
+  threshold = WIRE_HIT,
+  routes?: ReadonlyMap<string, Point[]>,
+) {
+  let best: {
+    wire: Wire;
+    point: Point;
+    dist: number;
+    index: number;
+    points: Point[];
+  } | null = null;
+  for (let at = circuit.wires.length - 1; at >= 0; at--) {
+    const w = circuit.wires[at];
+    const pts = routes?.get(w.id) ?? wirePoints(circuit, w);
     for (let i = 0; i < pts.length - 1; i++) {
       const hit = projectOnSegment(p, pts[i], pts[i + 1]);
       if (hit.dist <= threshold && (!best || hit.dist < best.dist))
-        best = { wire: w, point: hit.point, dist: hit.dist, index: i };
+        best = {
+          wire: w,
+          point: hit.point,
+          dist: hit.dist,
+          index: i,
+          points: pts,
+        };
     }
   }
   return best;
+}
+
+export type WireTap = { wireId: string; segment: number; point: Point };
+export type WireTarget = Endpoint | WireTap;
+
+const distance = (a: Point, b: Point) =>
+  Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+
+export function wireTap(
+  circuit: Circuit,
+  pointer: Point,
+  snapping: boolean,
+  radius: number,
+  options?: {
+    only?: Wire;
+    exclude?: string;
+    routes?: ReadonlyMap<string, Point[]>;
+  },
+): WireTap | null {
+  const wires = options?.only
+    ? [options.only]
+    : options?.exclude
+      ? circuit.wires.filter((w) => w.id !== options.exclude)
+      : circuit.wires;
+  const hit = hitWire({ ...circuit, wires }, pointer, radius, options?.routes);
+  if (!hit) return null;
+  const projected = projectOnSegment(
+    { x: snap(hit.point.x, snapping), y: snap(hit.point.y, snapping) },
+    hit.points[hit.index],
+    hit.points[hit.index + 1],
+  );
+  return { wireId: hit.wire.id, segment: hit.index, point: projected.point };
+}
+
+/** Resolve as many as two draft taps, keeping their host wire's route intact. */
+export function resolveWireTargets(circuit: Circuit, targets: WireTarget[]) {
+  const resolved: Endpoint[] = [];
+  const junctions = [...circuit.junctions];
+  const taps = new Map<string, { tap: WireTap; index: number }[]>();
+  for (const [index, target] of targets.entries()) {
+    if ("wireId" in target) {
+      const group = taps.get(target.wireId) ?? [];
+      group.push({ tap: target, index });
+      taps.set(target.wireId, group);
+    } else {
+      if (
+        "componentId" in target &&
+        !circuit.components.some((c) => c.id === target.componentId)
+      )
+        return null;
+      if (
+        "junctionId" in target &&
+        !circuit.junctions.some((j) => j.id === target.junctionId)
+      )
+        return null;
+      resolved[index] = target;
+    }
+  }
+
+  if ([...taps.keys()].some((id) => !circuit.wires.some((w) => w.id === id)))
+    return null;
+  const wires: Wire[] = [];
+  for (const wire of circuit.wires) {
+    const group = taps.get(wire.id);
+    if (!group) {
+      wires.push(wire);
+      continue;
+    }
+    const points = wirePoints(circuit, wire);
+    const cuts = group.map(({ tap, index }) => {
+      const start = points[tap.segment];
+      const end = points[tap.segment + 1];
+      if (!start || !end) return null;
+      const offset = distance(tap.point, start);
+      if (
+        Math.abs(offset + distance(tap.point, end) - distance(start, end)) >
+        1e-7
+      )
+        return null;
+      // Canonicalize a bend shared by two consecutive segments.
+      const segment =
+        offset === distance(start, end) ? tap.segment + 1 : tap.segment;
+      return {
+        ...tap,
+        index,
+        segment,
+        offset: segment === tap.segment ? offset : 0,
+      };
+    });
+    if (cuts.some((cut) => cut === null)) return null;
+    const ordered = cuts
+      .filter((cut) => cut !== null)
+      .sort((a, b) => a.segment - b.segment || a.offset - b.offset);
+
+    let wireId = wire.id;
+    let from = wire.from;
+    let to = wire.to;
+    let fromPoint = points[0];
+    let routeStart = 1;
+    let lastCut: (typeof ordered)[number] | undefined;
+    let lastEndpoint: Endpoint | undefined;
+    const addJunction = (point: Point): Endpoint => {
+      const id = uid();
+      junctions.push({ id, ...point });
+      return { junctionId: id };
+    };
+    for (const cut of ordered) {
+      if (cut.segment === lastCut?.segment && cut.offset === lastCut.offset) {
+        resolved[cut.index] = lastEndpoint!;
+        continue;
+      }
+      if (cut.offset === 0 && cut.segment === 0) {
+        if ("x" in from) from = addJunction(cut.point);
+        resolved[cut.index] = from;
+      } else if (cut.segment === points.length - 1) {
+        if ("x" in to) to = addJunction(cut.point);
+        resolved[cut.index] = to;
+      } else {
+        const to = addJunction(cut.point);
+        wires.push({
+          id: wireId,
+          from,
+          to,
+          corners: simplifyPoints([
+            fromPoint,
+            ...points.slice(routeStart, cut.segment + 1),
+            cut.point,
+          ]).slice(1, -1),
+        });
+        wireId = uid();
+        from = to;
+        fromPoint = cut.point;
+        routeStart = cut.segment + 1;
+        resolved[cut.index] = to;
+      }
+      lastCut = cut;
+      lastEndpoint = resolved[cut.index];
+    }
+    wires.push({
+      id: wireId,
+      from,
+      to,
+      corners:
+        wireId !== wire.id
+          ? simplifyPoints([fromPoint, ...points.slice(routeStart)]).slice(
+              1,
+              -1,
+            )
+          : wire.corners,
+    });
+  }
+  return { wires, junctions, resolved };
 }
 
 export function roundedPathD(points: Point[], radius = 10) {
@@ -150,10 +319,6 @@ export function moveWireSegment(
   return pts;
 }
 
-function sameEndpoint(a: Endpoint, b: Endpoint) {
-  return endpointKey(a) === endpointKey(b);
-}
-
 export function spliceComponentIntoWire(
   circuit: Circuit,
   wireId: string,
@@ -204,40 +369,53 @@ export function spliceComponentIntoWire(
   return true;
 }
 
-export function wireCarriesCurrent(
-  circuit: Circuit,
-  wire: Wire,
-  simulation: Simulation,
-) {
-  if (
-    (simulation.status !== "complete" && simulation.status !== "short") ||
-    (simulation.status === "complete" && simulation.sourceCurrent < 1e-6)
-  )
-    return false;
-  const reachesCurrent = (start: Endpoint) => {
-    if ("x" in start && !("componentId" in start) && !("junctionId" in start))
-      return false;
-    const stack: Endpoint[] = [start],
-      seen = new Set<string>();
-    while (stack.length) {
-      const e = stack.pop()!;
-      const key = endpointKey(e, wire.id, "walk");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if ("componentId" in e) {
-        const r = simulation.readings[e.componentId];
-        if (r && Math.abs(r.current) > 1e-6) return true;
+// A bridge has a uniquely determined current by Kirchhoff's current law.
+// Ideal wire loops leave their individual currents undetermined.
+export function wireCurrents(circuit: Circuit, simulation: Simulation) {
+  const wires = new Map<string, number>();
+  const graph = new Map<
+    string,
+    { id: string; to: string; forward: boolean }[]
+  >();
+  for (const w of circuit.wires) {
+    const from = endpointKey(w.from, w.id, "a");
+    const to = endpointKey(w.to, w.id, "b");
+    if (!graph.has(from)) graph.set(from, []);
+    if (!graph.has(to)) graph.set(to, []);
+    graph.get(from)!.push({ id: w.id, to, forward: true });
+    graph.get(to)!.push({ id: w.id, to: from, forward: false });
+  }
+  const current = new Map<string, number>();
+  for (const p of circuit.components) {
+    const amps = simulation.readings[p.id]?.current ?? 0;
+    current.set(endpointKey({ componentId: p.id, terminal: 0 }), amps);
+    current.set(endpointKey({ componentId: p.id, terminal: 1 }), -amps);
+  }
+  const visited = new Map<string, number>();
+  function walk(node: string, parent?: string) {
+    const entry = visited.size;
+    visited.set(node, entry);
+    let low = entry;
+    let demand = current.get(node) ?? 0;
+    for (const edge of graph.get(node)!) {
+      if (edge.id === parent) continue;
+      const neighbor = visited.get(edge.to);
+      if (neighbor !== undefined) {
+        low = Math.min(low, neighbor);
         continue;
       }
-      for (const w of circuit.wires) {
-        if (w.id === wire.id) continue;
-        if (sameEndpoint(w.from, e)) stack.push(w.to);
-        else if (sameEndpoint(w.to, e)) stack.push(w.from);
-      }
+      const child = walk(edge.to, edge.id);
+      low = Math.min(low, child.low);
+      demand += child.demand;
+      if (child.low > entry && Math.abs(child.demand) > 1e-6)
+        wires.set(edge.id, edge.forward ? child.demand : -child.demand);
     }
-    return false;
-  };
-  return reachesCurrent(wire.from) && reachesCurrent(wire.to);
+    return { low, demand };
+  }
+  for (const node of graph.keys()) {
+    if (!visited.has(node)) walk(node);
+  }
+  return wires;
 }
 
 export function applySegmentMove(

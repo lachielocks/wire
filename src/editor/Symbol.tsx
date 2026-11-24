@@ -117,6 +117,32 @@ export function Symbol({
           )}
         </>
       )}
+      {kind === "diode" && (
+        <path d="M-24 0H-16 M-16 -17L15 0L-16 17Z M16 -18V18 M16 0H24" />
+      )}
+      {kind === "capacitor" && (
+        <path d="M-24 0H-6 M-6 -20V20 M6 -20V20 M6 0H24" />
+      )}
+      {kind === "inductor" && (
+        <path d="M-24 0a6 10 0 0 1 12 0a6 10 0 0 1 12 0a6 10 0 0 1 12 0a6 10 0 0 1 12 0" />
+      )}
+      {kind === "fuse" && (
+        <>
+          <rect
+            x="-24"
+            y="-11"
+            width="48"
+            height="22"
+            rx="2"
+            fill={closed ? "none" : "var(--red-tint, #f5ded5)"}
+            stroke={closed ? "currentColor" : "var(--danger)"}
+          />
+          <path
+            d={closed ? "M-24 0H24" : "M-24 0H-8L-4 -4 M4 4L8 0H24"}
+            stroke={closed ? "currentColor" : "var(--danger)"}
+          />
+        </>
+      )}
       {kind === "ammeter" && circle("A")}
       {kind === "voltmeter" && circle("V")}
       {kind === "motor" && (

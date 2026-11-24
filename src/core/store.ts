@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import {
+  endpointKey,
   makePart,
   newProject,
   snap,
   uid,
-  wirePoints,
   type Endpoint,
   type Kind,
   type Part,
@@ -14,7 +14,13 @@ import {
   type View,
   type Wire,
 } from "./types";
-import { hitWire, spliceComponentIntoWire } from "./wires";
+import {
+  hitWire,
+  resolveWireTargets,
+  spliceComponentIntoWire,
+  wireTap,
+  type WireTarget,
+} from "./wires";
 type Snapshot = Pick<Project, "components" | "wires" | "junctions" | "name">;
 const snapshot = (p: Project): Snapshot =>
   structuredClone({
@@ -46,8 +52,13 @@ type State = {
   redo: () => void;
   copy: () => void;
   paste: () => void;
-  connect: (from: Endpoint, to: Endpoint, corners: Point[]) => void;
-  split: (wire: Wire, point: Point) => Endpoint;
+  connect: (
+    from: WireTarget,
+    to: WireTarget,
+    corners: Point[],
+    replace?: string,
+  ) => boolean;
+  split: (wire: Wire, point: Point) => void;
   setView: (view: View) => void;
   settings: (patch: Partial<Settings>) => void;
   load: (project: Project) => void;
@@ -237,48 +248,55 @@ export const useStore = create<State>((set, get) => ({
     });
     set({ selected: [...ids.values()] });
   },
-  connect: (from, to, corners) =>
-    get().change((p) => {
-      p.wires.push({ id: uid(), from, to, corners });
-    }),
-  split: (w, point) => {
-    const id = uid(),
-      j = { id, x: point.x, y: point.y };
-    const points = wirePoints(get().project, w);
-    let index = 0,
-      distance = Infinity;
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i],
-        b = points[i + 1];
-      const d = Math.abs(
-        Math.hypot(point.x - a.x, point.y - a.y) +
-          Math.hypot(point.x - b.x, point.y - b.y) -
-          Math.hypot(a.x - b.x, a.y - b.y),
-      );
-      if (d < distance) {
-        distance = d;
-        index = i;
-      }
+  connect: (from, to, corners, replace) => {
+    const { project, change, toast } = get();
+    if (
+      replace &&
+      (!project.wires.some((w) => w.id === replace) ||
+        [from, to].some(
+          (target) => "wireId" in target && target.wireId === replace,
+        ))
+    )
+      return false;
+    const next = resolveWireTargets(project, [from, to]);
+    if (!next) return false;
+    const [a, b] = next.resolved;
+    if (!("x" in b) && endpointKey(a) === endpointKey(b)) return false;
+    const wires = next.wires.filter((w) => w.id !== replace);
+    if (
+      wires.length >= 600 ||
+      next.junctions.length > 600 ||
+      corners.length > 100 ||
+      wires.some((w) => w.corners.length > 100)
+    ) {
+      toast("This connection would exceed the project size limit.");
+      return false;
     }
-    get().change((p) => {
-      p.junctions.push(j);
-      p.wires = p.wires.filter((v) => v.id !== w.id);
-      p.wires.push(
-        {
-          id: uid(),
-          from: w.from,
-          to: { junctionId: id },
-          corners: points.slice(1, index + 1),
-        },
-        {
-          id: uid(),
-          from: { junctionId: id },
-          to: w.to,
-          corners: points.slice(index + 1, -1),
-        },
-      );
+    change((p) => {
+      p.junctions = next.junctions;
+      p.wires = [...wires, { id: replace ?? uid(), from: a, to: b, corners }];
     });
-    return { junctionId: id };
+    return true;
+  },
+  split: (wire, point) => {
+    const { project, change, toast } = get();
+    const tap = wireTap(project, point, project.settings.snap, Infinity, {
+      only: wire,
+    });
+    const next = tap && resolveWireTargets(project, [tap]);
+    if (!next || next.junctions.length === project.junctions.length) return;
+    if (
+      next.wires.length > 600 ||
+      next.junctions.length > 600 ||
+      next.wires.some((w) => w.corners.length > 100)
+    ) {
+      toast("This connection would exceed the project size limit.");
+      return;
+    }
+    change((p) => {
+      p.wires = next.wires;
+      p.junctions = next.junctions;
+    });
   },
   setView: (view) =>
     get().change((p) => {

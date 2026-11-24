@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { outputLook } from "../core/output";
 import { format, type Part, type Reading } from "../core/types";
 import { useStore } from "../core/store";
+import { Overload } from "./Overload";
 const metal = "#a9b0b2",
   dark = "#323a39";
 function Cylinder({
@@ -386,6 +387,154 @@ function Buzzer({ on, pulse }: { on: boolean; pulse: boolean }) {
     </>
   );
 }
+const axial: [number, number, number] = [0, 0, Math.PI / 2];
+
+function Diode() {
+  return (
+    <>
+      <Base color="#e1ded1" />
+      <Posts />
+      <Cylinder
+        position={[0, 0.24, 0]}
+        rotation={axial}
+        radius={0.028}
+        height={0.92}
+      />
+      <Cylinder
+        position={[0, 0.24, 0]}
+        rotation={axial}
+        radius={0.096}
+        height={0.48}
+        color="#2c3238"
+      />
+      <Cylinder
+        position={[0.17, 0.24, 0]}
+        rotation={axial}
+        radius={0.1}
+        height={0.045}
+        color="#d4d6cb"
+      />
+    </>
+  );
+}
+
+function Capacitor() {
+  return (
+    <>
+      <Base color="#e1ded1" />
+      <Posts />
+      <Cylinder
+        position={[0, 0.23, 0]}
+        rotation={axial}
+        radius={0.026}
+        height={0.91}
+      />
+      <RoundedBox
+        args={[0.48, 0.38, 0.24]}
+        position={[0, 0.28, 0]}
+        radius={0.07}
+        castShadow
+      >
+        <meshStandardMaterial color="#3e719d" roughness={0.4} />
+      </RoundedBox>
+      <mesh position={[0, 0.33, 0.121]}>
+        <planeGeometry args={[0.29, 0.022]} />
+        <meshStandardMaterial color="#96b8ce" />
+      </mesh>
+    </>
+  );
+}
+
+function Inductor() {
+  const coil = useMemo(() => {
+    const points = Array.from({ length: 145 }, (_, i) => {
+      const t = i / 144;
+      const arc = t * Math.PI * 24;
+      return new THREE.Vector3(
+        (t - 0.5) * 0.54,
+        0.24 + Math.cos(arc) * 0.105,
+        Math.sin(arc) * 0.105,
+      );
+    });
+    return new THREE.CatmullRomCurve3(points);
+  }, []);
+  return (
+    <>
+      <Base color="#e1ded1" />
+      <Posts />
+      <Cylinder
+        position={[0, 0.24, 0]}
+        rotation={axial}
+        radius={0.027}
+        height={0.91}
+      />
+      <Cylinder
+        position={[0, 0.24, 0]}
+        rotation={axial}
+        radius={0.095}
+        height={0.62}
+        color="#333840"
+      />
+      <mesh castShadow>
+        <tubeGeometry args={[coil, 144, 0.016, 6, false]} />
+        <meshStandardMaterial
+          color="#c17a4f"
+          metalness={0.7}
+          roughness={0.34}
+        />
+      </mesh>
+    </>
+  );
+}
+
+function Fuse({ intact }: { intact: boolean }) {
+  return (
+    <>
+      <Base color="#e1ded1" />
+      <Posts />
+      {[-0.31, 0.31].map((x) => (
+        <Cylinder
+          key={x}
+          position={[x, 0.25, 0]}
+          rotation={axial}
+          radius={0.11}
+          height={0.16}
+        />
+      ))}
+      <mesh position={[0, 0.25, 0]} rotation={axial}>
+        <cylinderGeometry args={[0.105, 0.105, 0.53, 24]} />
+        <meshPhysicalMaterial
+          color={intact ? "#b9d4d3" : "#7e5449"}
+          metalness={0.1}
+          roughness={0.18}
+          opacity={intact ? 0.35 : 0.62}
+          transparent
+          depthWrite={false}
+        />
+      </mesh>
+      {intact ? (
+        <Cylinder
+          position={[0, 0.25, 0]}
+          rotation={axial}
+          radius={0.018}
+          height={0.54}
+        />
+      ) : (
+        [-0.16, 0.16].map((x) => (
+          <Cylinder
+            key={x}
+            position={[x, 0.25, 0]}
+            rotation={[0, 0, Math.PI / 2 + 0.27]}
+            radius={0.023}
+            height={0.18}
+            color="#59342c"
+          />
+        ))
+      )}
+    </>
+  );
+}
+
 function Meter({ value, unit }: { value: string; unit: string }) {
   const display = useMemo(() => {
     const canvas = document.createElement("canvas");
@@ -430,6 +579,7 @@ export function PhysicalPart({
   reading,
   selected,
   effects,
+  showFaults,
   onSelect,
   onToggle,
   position,
@@ -439,6 +589,7 @@ export function PhysicalPart({
   reading?: Reading;
   selected: boolean;
   effects: boolean;
+  showFaults: boolean;
   onSelect: () => void;
   onToggle: () => void;
 }) {
@@ -446,6 +597,18 @@ export function PhysicalPart({
   const invalidate = useThree((s) => s.invalidate);
   const update = useStore((s) => s.update);
   const group = useRef<THREE.Group>(null);
+  const look = outputLook(c.kind, reading, { effects });
+  const blown = c.kind === "fuse" && (!c.closed || reading?.fault === "fuse");
+  const [meterValue, meterUnit] =
+    c.kind === "ammeter"
+      ? reading
+        ? format(Math.abs(reading.current), "A").split(" ")
+        : ["—", "A"]
+      : c.kind === "voltmeter"
+        ? reading
+          ? format(Math.abs(reading.voltage), "V").split(" ")
+          : ["—", "V"]
+        : ["", ""];
   const rot = (c.rotation * Math.PI) / 180;
   useFrame((_, d) => {
     if (group.current) {
@@ -509,36 +672,17 @@ export function PhysicalPart({
         ) : c.kind === "led" ? (
           <LED c={c} brightness={reading?.brightness ?? 0} />
         ) : c.kind === "buzzer" ? (
-          <Buzzer
-            on={outputLook("buzzer", reading).on}
-            pulse={outputLook("buzzer", reading, { effects }).pulse}
-          />
-        ) : c.kind === "ammeter" || c.kind === "voltmeter" ? (
-          <Meter
-            value={
-              c.kind === "ammeter"
-                ? (Math.abs(reading?.current ?? 0) * 1000).toFixed(1)
-                : Math.abs(reading?.voltage ?? 0).toFixed(2)
-            }
-            unit={c.kind === "ammeter" ? "mA" : "V"}
-          />
+          <Buzzer on={look.on} pulse={look.pulse} />
+        ) : c.kind === "diode" ? (
+          <Diode />
+        ) : c.kind === "capacitor" ? (
+          <Capacitor />
+        ) : c.kind === "inductor" ? (
+          <Inductor />
+        ) : c.kind === "fuse" ? (
+          <Fuse intact={!blown} />
         ) : (
-          <>
-            <Base />
-            <Posts />
-            <Cylinder
-              position={[0, 0.25, 0]}
-              radius={0.24}
-              height={0.32}
-              color={dark}
-            />
-            {[-0.12, 0, 0.12].map((x) => (
-              <mesh key={x} position={[x, 0.415, 0]}>
-                <boxGeometry args={[0.035, 0.01, 0.25]} />
-                <meshStandardMaterial color="#121915" />
-              </mesh>
-            ))}
-          </>
+          <Meter value={meterValue} unit={meterUnit} />
         )}
         {(selected || hover) && (
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.033, 0]}>
@@ -547,6 +691,13 @@ export function PhysicalPart({
           </mesh>
         )}
       </group>
+      {showFaults && reading?.fault && (
+        <Overload
+          fault={reading.fault}
+          animate={effects}
+          height={c.kind === "lamp" ? 0.72 : 0.46}
+        />
+      )}
       <Html
         position={[0, -0.02, 0.63]}
         center
@@ -565,15 +716,21 @@ export function PhysicalPart({
             }}
           >
             {c.label}
-            {["resistor", "variable"].includes(c.kind) && (
-              <small>{format(c.resistance, "Ω")}</small>
-            )}
             <small>{c.closed ? "closed" : "open"}</small>
           </button>
         ) : (
-          <span className={`physical-label ${selected ? "selected" : ""}`}>
+          <span
+            className={`physical-label ${selected ? "selected" : ""}`}
+            data-fuse-state={
+              c.kind === "fuse" ? (blown ? "blown" : "intact") : undefined
+            }
+          >
             {c.label}
             {c.kind === "push" && <small>{c.closed ? "closed" : "open"}</small>}
+            {blown && <small>Blown</small>}
+            {reading?.fault && reading.fault !== "fuse" && (
+              <small>Overload</small>
+            )}
           </span>
         )}
       </Html>

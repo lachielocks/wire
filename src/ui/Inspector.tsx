@@ -11,7 +11,13 @@ import {
 } from "lucide-react";
 import { useStore } from "../core/store";
 import { outputLook } from "../core/output";
-import { format, library, type Part, type Simulation } from "../core/types";
+import {
+  DEFAULT_FUSE_RATING,
+  format,
+  library,
+  type Part,
+  type Simulation,
+} from "../core/types";
 import { Symbol } from "../editor/Symbol";
 import { AnimatedContent } from "./AnimatedContent";
 export function Inspector({
@@ -43,7 +49,7 @@ export function Inspector({
           min={min}
           max={max}
           step="any"
-          value={c![key] as number}
+          value={(c![key] as number | undefined) ?? DEFAULT_FUSE_RATING}
           onChange={(e) => {
             const v = e.currentTarget.valueAsNumber;
             if (Number.isFinite(v) && v >= min && v <= max)
@@ -54,6 +60,16 @@ export function Inspector({
       </div>
     </label>
   );
+  const reading = c ? simulation.readings[c.id] : undefined;
+  const modelNotes: Partial<Record<Part["kind"], string>> = {
+    diode:
+      "Modelled with an adjustable forward drop and 2 Ω dynamic resistance.",
+    capacitor:
+      "An open branch at steady DC. The voltage can be measured when both terminals have a common reference.",
+    inductor:
+      "An inductor passes steady DC. Only its winding resistance contributes to the voltage drop.",
+    fuse: "A 0.01 Ω link that opens above its current rating. In Wire it also opens if doing so stops a protected bulb or LED from overheating.",
+  };
   return (
     <aside className="inspector">
       <div className="panel-heading">
@@ -97,8 +113,45 @@ export function Inspector({
             </label>
             {(c.kind === "cell" || c.kind === "battery") &&
               number("Voltage", "voltage", "V", 0.1, 100)}
-            {["resistor", "variable", "motor", "buzzer"].includes(c.kind) &&
-              number("Resistance", "resistance", "Ω", 0.01)}
+            {["resistor", "variable", "motor", "buzzer", "inductor"].includes(
+              c.kind,
+            ) &&
+              number(
+                c.kind === "inductor" ? "Winding resistance" : "Resistance",
+                "resistance",
+                "Ω",
+                0.01,
+              )}
+            {["resistor", "variable", "inductor"].includes(c.kind) &&
+              number("Rated power", "nominalPower", "W", 0.01, 100)}
+            {c.kind === "diode" &&
+              number("Forward voltage", "forwardVoltage", "V", 0.1, 10)}
+            {c.kind === "fuse" && (
+              <>
+                {number("Current rating", "ratedCurrent", "A", 0.001, 20)}
+                <div className="field">
+                  <span
+                    className={
+                      c.closed && reading?.fault !== "fuse"
+                        ? undefined
+                        : "blown-fuse-label"
+                    }
+                  >
+                    {c.closed && reading?.fault !== "fuse"
+                      ? "Fuse intact"
+                      : "Fuse blown"}
+                  </span>
+                  {(!c.closed || reading?.fault === "fuse") && (
+                    <button
+                      className="switch-state"
+                      onClick={() => s.update(c.id, { closed: true })}
+                    >
+                      Replace fuse
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
             {c.kind === "variable" && (
               <label className="field">
                 <span>
@@ -206,27 +259,42 @@ export function Inspector({
               </button>
             </div>
           </div>
-          {simulation.readings[c.id] && (
+          {reading && (
             <div className="readings">
               <h3>
                 <Activity size={14} /> Live measurements
               </h3>
               <div>
-                <span>Voltage</span>
-                <strong data-testid="reading-voltage">
-                  {format(Math.abs(simulation.readings[c.id].voltage), "V")}
+                <span title="Potential difference between the two terminals">
+                  Voltage
+                </span>
+                <strong
+                  data-testid="reading-voltage"
+                  title={
+                    reading.floatingVoltage
+                      ? "No shared voltage reference between these terminals"
+                      : undefined
+                  }
+                >
+                  {reading.floatingVoltage
+                    ? "—"
+                    : format(Math.abs(reading.voltage), "V")}
                 </strong>
               </div>
               <div>
-                <span>Current</span>
+                <span title="Magnitude of the current through this component">
+                  Current
+                </span>
                 <strong data-testid="reading-current">
-                  {format(Math.abs(simulation.readings[c.id].current), "A")}
+                  {format(Math.abs(reading.current), "A")}
                 </strong>
               </div>
               <div>
-                <span>Power</span>
-                <strong>
-                  {format(Math.abs(simulation.readings[c.id].power), "W")}
+                <span>
+                  {reading.power < 0 ? "Power delivered" : "Power absorbed"}
+                </span>
+                <strong data-testid="reading-power">
+                  {format(Math.abs(reading.power), "W")}
                 </strong>
               </div>
               {c.kind === "lamp" && (
@@ -235,34 +303,34 @@ export function Inspector({
                   <div>
                     <i
                       style={{
-                        width: `${Math.min(100, simulation.readings[c.id].brightness * 100)}%`,
+                        width: `${Math.min(100, reading.brightness * 100)}%`,
                       }}
                     />
                   </div>
                   <small>
-                    {Math.round(simulation.readings[c.id].brightness * 100)}% of
-                    rated power
+                    {Math.round(reading.brightness * 100)}% of rated power
                   </small>
                 </div>
               )}
             </div>
           )}
           <p className="model-note">
-            {c.kind === "lamp"
-              ? "A simple bulb model: constant resistance from its rated voltage and power."
-              : c.kind === "led"
-                ? "Simplified LED: forward-voltage drop + 10 Ω dynamic resistance. Add an external current-limiting resistor."
-                : c.kind === "motor"
-                  ? "Resistive DC motor model. Speed is illustrative; torque and startup behaviour are not simulated."
-                  : c.kind === "buzzer"
-                    ? "Activates above 1 V and 5 mA. Enable audio in settings to hear it."
-                    : c.kind === "voltmeter"
-                      ? "1 GΩ input resistance. Connect across the two points you want to measure."
-                      : c.kind === "ammeter"
-                        ? "0.01 Ω internal resistance. Insert into the branch you want to measure."
-                        : c.kind === "cell" || c.kind === "battery"
-                          ? "DC voltage source with 0.1 Ω internal resistance. The long line is positive."
-                          : "Values and connections update the simulation immediately."}
+            {modelNotes[c.kind] ??
+              (c.kind === "lamp"
+                ? "A simple bulb model: constant resistance from its rated voltage and power."
+                : c.kind === "led"
+                  ? "Simplified LED: forward-voltage drop + 10 Ω dynamic resistance. Add an external current-limiting resistor."
+                  : c.kind === "motor"
+                    ? "Resistive DC motor model. Speed is illustrative; torque and startup behaviour are not simulated."
+                    : c.kind === "buzzer"
+                      ? "Activates above 1 V and 5 mA. Enable audio in settings to hear it."
+                      : c.kind === "voltmeter"
+                        ? "1 GΩ input resistance. Connect across the two points you want to measure."
+                        : c.kind === "ammeter"
+                          ? "0.01 Ω internal resistance. Insert into the branch you want to measure."
+                          : c.kind === "cell" || c.kind === "battery"
+                            ? "DC voltage source with 0.1 Ω internal resistance. The long line is positive."
+                            : "Values and connections update the simulation immediately.")}
           </p>
           <button className="danger-text" onClick={s.remove}>
             <Trash2 size={14} /> Delete{" "}
