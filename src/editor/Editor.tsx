@@ -9,6 +9,7 @@ import {
   Copy,
   RotateCw,
   Trash2,
+  WandSparkles,
 } from "lucide-react";
 import { useStore, snappedPoint } from "../core/store";
 import {
@@ -978,6 +979,21 @@ export function Editor({ simulation }: { simulation: Simulation }) {
           onClick={() => s.setTool("pan")}
         >
           <Hand size={17} />
+        </button>
+        <button
+          title="Auto-complete circuit"
+          aria-label="Auto-complete circuit"
+          className="auto-complete-tool"
+          onClick={() => {
+            if (!s.autoComplete()) return;
+            setDraft(null);
+            setTapHint(null);
+            wireDown.current = null;
+            s.setTool("select");
+          }}
+        >
+          <WandSparkles size={16} />
+          <span>Auto-complete</span>
         </button>
         <span className="tool-separator" />
         <button aria-label="Zoom out" onClick={() => zoom(0.85)}>

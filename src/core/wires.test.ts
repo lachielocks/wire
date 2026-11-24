@@ -94,9 +94,7 @@ describe("splice into a wire", () => {
     const before = solve(p).sourceCurrent;
     const sw = makePart("switch", 0, 0);
     sw.closed = true;
-    expect(spliceComponentIntoWire(p, top.id, { x: 300, y: 200 }, sw)).toBe(
-      true,
-    );
+    spliceComponentIntoWire(p, hitWire(p, { x: 300, y: 200 })!, sw);
     expect(p.components).toHaveLength(3);
     expect(p.wires).toHaveLength(3);
     expect(p.wires.some((w) => w.id === top.id)).toBe(false);
@@ -117,6 +115,82 @@ describe("splice into a wire", () => {
     expect(solve(p).status).toBe("open");
     expect(solve(p).sourceCurrent).toBe(0);
   });
+  it.each(["cell", "battery"] as const)(
+    "adds a %s in series with aiding polarity, regardless of wire endpoint order",
+    (kind) => {
+      for (const reversed of [false, true]) {
+        const { p, cell, lamp, top } = seriesCellLamp();
+        if (reversed) [top.from, top.to] = [top.to, top.from];
+        const supply = makePart(kind, 0, 0);
+        spliceComponentIntoWire(p, hitWire(p, { x: 300, y: 200 })!, supply);
+        expect(supply.rotation).toBe(0);
+        expect(
+          p.wires.some(
+            (wire) =>
+              [wire.from, wire.to].some(
+                (end) =>
+                  "componentId" in end &&
+                  end.componentId === cell.id &&
+                  end.terminal === 1,
+              ) &&
+              [wire.from, wire.to].some(
+                (end) =>
+                  "componentId" in end &&
+                  end.componentId === supply.id &&
+                  end.terminal === 0,
+              ),
+          ),
+        ).toBe(true);
+        const reading = solve(p).readings[lamp.id];
+        expect(Math.abs(reading.current)).toBeCloseTo(
+          (cell.voltage + supply.voltage) / 7.7,
+          9,
+        );
+      }
+    },
+  );
+
+  it("orients a battery on a vertical lead with the switch open", () => {
+    const { p, cell, lamp, top, bottom } = seriesCellLamp();
+    const sw = makePart("switch", 300, 200);
+    spliceComponentIntoWire(p, hitWire(p, { x: 300, y: 200 })!, sw);
+    bottom.corners = [
+      { x: 460, y: 380 },
+      { x: 140, y: 380 },
+    ];
+    const drop = hitWire(p, { x: 460, y: 300 })!;
+    expect(drop.wire.id).toBe(bottom.id);
+    expect(p.wires.some((w) => w.id === top.id)).toBe(false);
+
+    const battery = makePart("battery", 0, 0);
+    spliceComponentIntoWire(p, drop, battery);
+    expect(battery.rotation).toBe(90);
+    expect(sw.closed).toBe(false);
+    expect(solve(p).status).toBe("open");
+    sw.closed = true;
+    expect(Math.abs(solve(p).readings[lamp.id].current)).toBeCloseTo(
+      (cell.voltage + battery.voltage) / 7.71,
+      9,
+    );
+  });
+
+  it.each(["diode", "led"] as const)(
+    "points a dropped %s in the direction of current",
+    (kind) => {
+      const { p, cell, lamp } = seriesCellLamp();
+      cell.voltage = 3;
+      const diode = makePart(kind, 0, 0);
+      spliceComponentIntoWire(p, hitWire(p, { x: 311, y: 200 })!, diode, false);
+      expect(diode).toMatchObject({ x: 311, y: 200, rotation: 180 });
+      const result = solve(p);
+      expect(result.readings[diode.id].current).toBeGreaterThan(0);
+      expect(result.readings[diode.id].current).toBeCloseTo(
+        Math.abs(result.readings[lamp.id].current),
+        9,
+      );
+    },
+  );
+
   it("ignores a drop that is not on a wire", () => {
     const { p } = seriesCellLamp();
     expect(hitWire(p, { x: 20, y: 20 })).toBeNull();

@@ -1,3 +1,4 @@
+import { solve, source } from "./solver";
 import {
   endpointKey,
   snap,
@@ -28,19 +29,21 @@ export function projectOnSegment(p: Point, a: Point, b: Point) {
   return { point, t, dist: Math.hypot(p.x - point.x, p.y - point.y) };
 }
 
+type WireHit = {
+  wire: Wire;
+  point: Point;
+  dist: number;
+  index: number;
+  points: Point[];
+};
+
 export function hitWire(
   circuit: Circuit,
   p: Point,
   threshold = WIRE_HIT,
   routes?: ReadonlyMap<string, Point[]>,
-) {
-  let best: {
-    wire: Wire;
-    point: Point;
-    dist: number;
-    index: number;
-    points: Point[];
-  } | null = null;
+): WireHit | null {
+  let best: WireHit | null = null;
   for (let at = circuit.wires.length - 1; at >= 0; at--) {
     const w = circuit.wires[at];
     const pts = routes?.get(w.id) ?? wirePoints(circuit, w);
@@ -319,54 +322,67 @@ export function moveWireSegment(
   return pts;
 }
 
+function dropCurrent(circuit: Circuit, wire: Wire) {
+  const current = wireCurrents(circuit, solve(circuit)).get(wire.id);
+  if (current !== undefined) return current;
+  const controls = circuit.components.filter(
+    (p) => (p.kind === "switch" || p.kind === "push") && !p.closed,
+  );
+  if (!controls.length) return 0;
+
+  // Infer the direction with controls closed without changing their saved state.
+  const closed = {
+    ...circuit,
+    components: circuit.components.map((p) =>
+      controls.includes(p) ? { ...p, closed: true } : p,
+    ),
+  };
+  return wireCurrents(closed, solve(closed)).get(wire.id) ?? 0;
+}
+
 export function spliceComponentIntoWire(
   circuit: Circuit,
-  wireId: string,
-  drop: Point,
+  hit: WireHit,
   part: Part,
+  snapping = true,
 ) {
-  const wire = circuit.wires.find((w) => w.id === wireId);
-  if (!wire) return false;
-  const pts = wirePoints(circuit, wire);
-  let index = 0,
-    best = Infinity,
-    hit = drop;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const h = projectOnSegment(drop, pts[i], pts[i + 1]);
-    if (h.dist < best) {
-      best = h.dist;
-      index = i;
-      hit = h.point;
-    }
-  }
-  const a = pts[index],
-    b = pts[index + 1],
-    horizontal = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y),
-    dx = b.x - a.x,
-    dy = b.y - a.y;
-  part.rotation = horizontal ? (dx >= 0 ? 0 : 180) : dy >= 0 ? 90 : 270;
-  part.x = snap(hit.x);
-  part.y = snap(hit.y);
-  const left = simplifyPoints([...pts.slice(0, index + 1), hit]),
-    right = simplifyPoints([hit, ...pts.slice(index + 1)]);
-  if (!circuit.components.some((c) => c.id === part.id))
-    circuit.components.push(part);
-  circuit.wires = circuit.wires.filter((w) => w.id !== wireId);
+  const { wire, point, index, points } = hit;
+  const a = points[index];
+  const b = points[index + 1];
+  const horizontal = a.y === b.y;
+  const axis = horizontal ? (b.x >= a.x ? 0 : 180) : b.y >= a.y ? 90 : 270;
+  const supply = source(part);
+  const polarized = supply || part.kind === "led" || part.kind === "diode";
+  const current = polarized ? dropCurrent(circuit, wire) : 0;
+  // Current leaves a source's positive terminal and enters a diode's anode.
+  const flip =
+    polarized && !current ? axis >= 180 : supply ? current > 0 : current < 0;
+  part.rotation = (axis + (flip ? 180 : 0)) % 360;
+
+  const position = projectOnSegment(
+    { x: snap(point.x, snapping), y: snap(point.y, snapping) },
+    a,
+    b,
+  ).point;
+  Object.assign(part, position);
+  const left = simplifyPoints([...points.slice(0, index + 1), position]);
+  const right = simplifyPoints([position, ...points.slice(index + 1)]);
+  circuit.components.push(part);
+  circuit.wires = circuit.wires.filter((w) => w.id !== wire.id);
   circuit.wires.push(
     {
       id: uid(),
       from: wire.from,
-      to: { componentId: part.id, terminal: 0 },
+      to: { componentId: part.id, terminal: flip ? 1 : 0 },
       corners: left.slice(1, -1),
     },
     {
       id: uid(),
-      from: { componentId: part.id, terminal: 1 },
+      from: { componentId: part.id, terminal: flip ? 0 : 1 },
       to: wire.to,
       corners: right.slice(1, -1),
     },
   );
-  return true;
 }
 
 // A bridge has a uniquely determined current by Kirchhoff's current law.

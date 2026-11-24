@@ -492,3 +492,80 @@ test("builds parallel branches directly on wires and undoes each junction with i
     "Circuit complete",
   );
 });
+
+test("orients a dropped battery to add to the existing cell", async ({
+  page,
+}) => {
+  const project = example();
+  project.view = "2d";
+  const wire = project.wires[0];
+  [wire.from, wire.to] = [wire.to, wire.from];
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await page.locator("input[type=file]").setInputFiles({
+    name: "battery-drop.wire.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(project)),
+  });
+  await expect(page.getByTestId("simulation-status")).toHaveText(
+    "Circuit complete",
+  );
+  await page.getByRole("button", { name: "Fit circuit", exact: true }).click();
+  const canvas = page.getByTestId("schematic");
+  const position = await canvas
+    .locator(".wire-line")
+    .first()
+    .evaluate((wire: SVGPathElement) => {
+      const midpoint = wire
+        .getPointAtLength(wire.getTotalLength() / 2)
+        .matrixTransform(wire.getScreenCTM()!);
+      const bounds = wire.ownerSVGElement!.getBoundingClientRect();
+      return { x: midpoint.x - bounds.left, y: midpoint.y - bounds.top };
+    });
+  await page
+    .getByRole("button", { name: "Add Battery", exact: true })
+    .dragTo(canvas, { targetPosition: position });
+  await expect(page.locator(".wire")).toHaveCount(4);
+  await expect(
+    page.getByTestId("part-battery").locator('[transform="rotate(0)"]'),
+  ).toHaveCount(1);
+  await page.getByTestId("part-lamp").click();
+  await expect(page.getByTestId("reading-current")).toHaveText("778.2 mA");
+});
+
+test("auto-completes a circuit and puts the voltmeter across the bulb", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await blank(page);
+  for (const kind of ["Cell", "Bulb", "Voltmeter"]) {
+    await page
+      .getByRole("button", { name: `Add ${kind}`, exact: true })
+      .click();
+  }
+  const autoComplete = page.getByRole("button", {
+    name: "Auto-complete circuit",
+    exact: true,
+  });
+  await expect(autoComplete).toBeVisible();
+  await autoComplete.click();
+  await expect(page.locator(".wire")).toHaveCount(6);
+  await expect(page.locator(".junction-dot")).toHaveCount(2);
+  await expect(page.getByTestId("simulation-status")).toHaveText(
+    "Circuit complete",
+  );
+  await page.getByTestId("part-voltmeter").click();
+  await expect(page.getByTestId("reading-voltage")).toHaveText("1.48 V");
+  await page.getByTestId("part-lamp").click();
+  await expect(page.getByTestId("reading-current")).toHaveText("197.4 mA");
+  await page.getByRole("button", { name: "Fit circuit", exact: true }).click();
+  await page.screenshot({ path: "test-results/auto-complete.png" });
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.locator(".wire")).toHaveCount(0);
+  await expect(page.getByTestId("simulation-status")).toHaveText(
+    "Open circuit",
+  );
+  await page.getByRole("button", { name: "Redo", exact: true }).click();
+  await expect(page.locator(".wire")).toHaveCount(6);
+  await expect(page.locator(".junction-dot")).toHaveCount(2);
+});

@@ -334,6 +334,7 @@ function candidates(
   b: Point,
   startDir: Point | null,
   endDir: Point | null,
+  extraLanes = false,
 ) {
   const paths: Point[][] = [];
   const push = (pts: Point[]) => paths.push(collapse(pts));
@@ -362,6 +363,18 @@ function candidates(
     ...(startDir?.y ? [a.y + startDir.y * 40, a.y + startDir.y * 80] : []),
     ...(endDir?.y ? [b.y + endDir.y * 40, b.y + endDir.y * 80] : []),
   ]);
+  if (extraLanes) {
+    for (const offset of [60, 80, 100]) {
+      xs.push(
+        snap(Math.min(a.x, b.x) - offset),
+        snap(Math.max(a.x, b.x) + offset),
+      );
+      ys.push(
+        snap(Math.min(a.y, b.y) - offset),
+        snap(Math.max(a.y, b.y) + offset),
+      );
+    }
+  }
   for (const x of xs) push([a, { x, y: a.y }, { x, y: b.y }, b]);
   for (const y of ys) push([a, { x: a.x, y }, { x: b.x, y }, b]);
   if (startDir && endDir) {
@@ -381,6 +394,7 @@ export function routeOrthogonal(
   endDir: Point | null,
   boxes: { minX: number; maxX: number; minY: number; maxY: number }[],
   avoid: Point[],
+  extraCost?: (points: Point[]) => number,
 ): Point[] {
   if (
     !endDir &&
@@ -405,11 +419,11 @@ export function routeOrthogonal(
     ends = [from, to];
   let best: Point[] | null = null,
     bestScore = Infinity;
-  for (const mid of candidates(start, end, startDir, endDir)) {
+  for (const mid of candidates(start, end, startDir, endDir, !!extraCost)) {
     const pts = collapse([...prefix, ...mid.slice(1, -1), ...suffix]);
     if (!firstMoveOk(pts, startDir) || !lastMoveOk(pts, endDir)) continue;
     if (!pathClear(pts, boxes, avoid, ends)) continue;
-    const score = scorePath(pts);
+    const score = scorePath(pts) + (extraCost?.(pts) ?? 0);
     if (score < bestScore) {
       bestScore = score;
       best = pts;
@@ -425,7 +439,11 @@ function partBody(part: Part) {
     maxY: part.y + 32,
   };
 }
-export function wirePoints(c: Circuit, w: Wire): Point[] {
+export function wirePoints(
+  c: Circuit,
+  w: Wire,
+  extraCost?: (points: Point[]) => number,
+): Point[] {
   const boxes = c.components.map(partBody),
     avoid = c.components.flatMap((p) => [terminal(p, 0), terminal(p, 1)]),
     anchors = [
@@ -442,6 +460,7 @@ export function wirePoints(c: Circuit, w: Wire): Point[] {
       i === anchors.length - 2 ? anchors[anchors.length - 1].dir : null,
       boxes,
       avoid,
+      extraCost,
     );
     out.push(...(i ? piece.slice(1) : piece));
   }

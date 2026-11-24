@@ -4,13 +4,16 @@ import { useStore } from "./store";
 import {
   defaults,
   endpoint,
+  endpointKey,
   example,
+  makePart,
   newProject,
   snap,
   terminal,
+  uid,
   wirePoints,
 } from "./types";
-import { solve } from "./solver";
+import { connectivity, solve } from "./solver";
 import {
   autosave,
   deleteProject,
@@ -229,5 +232,138 @@ describe("drop a part onto a wire", () => {
     ).toBe(false);
     expect(solve(p).status).toBe("complete");
     expect(solve(p).sourceCurrent).toBeCloseTo(solve(before).sourceCurrent, 8);
+  });
+});
+
+describe("auto-complete circuit", () => {
+  it("completes a partial loop, continues a wire tail, and undoes as a single action", () => {
+    const s = useStore.getState();
+    const p = example();
+    p.wires = [p.wires[0], { ...p.wires[1], to: { x: 560, y: 360 } }];
+    s.load(p);
+    expect(s.autoComplete()).toBe(true);
+    const complete = useStore.getState().project;
+    expect(complete.wires).toContainEqual(p.wires[0]);
+    expect(complete.junctions).toHaveLength(1);
+    expect(solve(complete).status).toBe("complete");
+    expect(solve(complete).sourceCurrent).toBeCloseTo(1.5 / 7.61, 8);
+    s.undo();
+    expect(useStore.getState().project.wires).toEqual(p.wires);
+    expect(useStore.getState().project.junctions).toHaveLength(0);
+    s.redo();
+    expect(useStore.getState().project.wires).toEqual(complete.wires);
+  });
+
+  it("adds a second load as a separate branch without disturbing a completed circuit", () => {
+    const s = useStore.getState();
+    const p = example();
+    const resistor = makePart("resistor", 360, 520);
+    p.components.push(resistor);
+    s.load(p);
+    expect(s.autoComplete()).toBe(true);
+    const result = useStore.getState().project;
+    expect(result.wires.slice(0, p.wires.length)).toEqual(p.wires);
+    const reading = solve(result).readings[resistor.id];
+    expect(Math.abs(reading.current)).toBeGreaterThan(0.01);
+    expect(solve(result).status).toBe("complete");
+  });
+
+  it("keeps the polarity of sources and diodes when completing separate parts", () => {
+    const s = useStore.getState();
+    const p = newProject();
+    const cell = makePart("cell", 200, 200);
+    const battery = makePart("battery", 360, 200);
+    const resistor = makePart("resistor", 520, 200);
+    const diode = makePart("diode", 520, 380);
+    p.components = [cell, battery, resistor, diode];
+    s.load(p);
+    expect(s.autoComplete()).toBe(true);
+    const result = solve(useStore.getState().project);
+    expect(result.status).toBe("complete");
+    expect(result.readings[diode.id].current).toBeCloseTo(
+      (1.5 + 4.5 - 0.7) / 102.2,
+      8,
+    );
+    expect(result.readings[cell.id].power).toBeLessThan(0);
+    expect(result.readings[battery.id].power).toBeLessThan(0);
+  });
+
+  it("routes automatic wires on different nets without crossings or overlaps", () => {
+    const p = newProject();
+    const cell = makePart("cell", 200, 140);
+    const lamp = makePart("lamp", 360, 140);
+    const meter = makePart("voltmeter", 520, 140);
+    p.components = [cell, lamp, meter];
+    const s = useStore.getState();
+    s.load(p);
+    expect(s.autoComplete()).toBe(true);
+    const result = useStore.getState().project;
+    expect(result.junctions).toHaveLength(2);
+    const nets = connectivity(result);
+    const paths = result.wires.map((wire) => ({
+      net: nets.find(endpointKey(wire.from, wire.id, "a")),
+      points: wirePoints(result, wire),
+    }));
+    for (const [i, path] of paths.entries()) {
+      for (const other of paths.slice(i + 1)) {
+        if (path.net === other.net) continue;
+        for (const [j, start] of path.points.slice(0, -1).entries()) {
+          const end = path.points[j + 1];
+          const axis = start.y === end.y ? "x" : "y";
+          const level = axis === "x" ? "y" : "x";
+          for (const [k, a] of other.points.slice(0, -1).entries()) {
+            const b = other.points[k + 1];
+            if (a[level] !== b[level]) {
+              const within = (n: number, from: number, to: number) =>
+                n >= Math.min(from, to) && n <= Math.max(from, to);
+              expect(
+                within(a[axis], start[axis], end[axis]) &&
+                  within(start[level], a[level], b[level]),
+              ).toBe(false);
+              continue;
+            }
+            if (start[level] !== a[level]) continue;
+            const overlap =
+              Math.min(
+                Math.max(start[axis], end[axis]),
+                Math.max(a[axis], b[axis]),
+              ) -
+              Math.max(
+                Math.min(start[axis], end[axis]),
+                Math.min(a[axis], b[axis]),
+              );
+            expect(overlap).toBeLessThanOrEqual(0);
+          }
+        }
+      }
+    }
+  });
+
+  it("leaves a short or an ambiguous branch unchanged", () => {
+    const s = useStore.getState();
+    const p = newProject();
+    const battery = makePart("battery", 200, 200);
+    const a = makePart("resistor", 400, 200);
+    const b = makePart("lamp", 400, 380);
+    p.components = [battery, a, b];
+    for (const load of [a, b]) {
+      p.wires.push({
+        id: uid(),
+        from: { componentId: battery.id, terminal: 0 },
+        to: { componentId: load.id, terminal: 0 },
+        corners: [],
+      });
+    }
+    s.load(p);
+    expect(s.autoComplete()).toBe(false);
+    expect(useStore.getState().project.wires).toEqual(p.wires);
+    expect(useStore.getState().past).toHaveLength(0);
+
+    p.components = [battery, a];
+    a.resistance = 0.1;
+    p.wires = [];
+    s.load(p);
+    expect(s.autoComplete()).toBe(false);
+    expect(useStore.getState().project.wires).toHaveLength(0);
   });
 });

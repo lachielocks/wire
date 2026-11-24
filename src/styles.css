@@ -738,6 +738,25 @@ kbd {
   color: var(--subtle);
   flex-shrink: 0;
 }
+.editor-tools .auto-complete-tool {
+  width: auto;
+  min-width: 28px;
+  padding: 0 7px;
+  gap: 5px;
+  color: var(--green);
+  background: var(--green-tint);
+  font-size: 10px;
+}
+@media (max-width: 1100px) {
+  .view-split .auto-complete-tool span {
+    display: none;
+  }
+}
+@media (max-width: 350px) {
+  .auto-complete-tool span {
+    display: none;
+  }
+}
 .floating button.active {
   background: var(--green-tint);
   color: var(--green);

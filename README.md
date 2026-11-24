@@ -52,6 +52,18 @@ While drawing, click or drop onto a terminal or a highlighted point on another
 wire. A dot marks the new junction. Plain crossings stay separate. Double-click
 with the Select tool to place a junction by itself.
 
+**Dropping parts onto wires:** drag a part from the library onto a wire to
+insert it in series. Cells and batteries reinforce the wire's current direction.
+Diodes and LEDs face forward. Parts follow the wire's horizontal or vertical
+segment. Press R to adjust the orientation when placing parts on the grid or
+on a wire with no clear current direction.
+
+**Auto-complete circuit:** use the wand in the schematic toolbar to connect
+placed parts and finish open loops. It keeps existing connections, follows the
+layout when routing wires, and connects free voltmeters across a nearby load.
+Automatic meter branches put junction dots on the load's leads. One Undo
+removes the automatic connections.
+
 **Editing:** select a wire to show its ends, bends and segment handles. Drag an
 end to reconnect it; drag a bend or a segment to reshape it. Wires use rounded
 orthogonal routing. Moving or rotating a part keeps its wires attached to the

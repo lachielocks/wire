@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { autoCompleteCircuit } from "./autoComplete";
 import {
   endpointKey,
   makePart,
@@ -59,6 +60,7 @@ type State = {
     replace?: string,
   ) => boolean;
   split: (wire: Wire, point: Point) => void;
+  autoComplete: () => boolean;
   setView: (view: View) => void;
   settings: (patch: Partial<Settings>) => void;
   load: (project: Project) => void;
@@ -109,8 +111,8 @@ export const useStore = create<State>((set, get) => ({
       return;
     }
     get().change((p) => {
-      p.components.push(part);
-      if (hit) spliceComponentIntoWire(p, hit.wire.id, hit.point, part);
+      if (hit) spliceComponentIntoWire(p, hit, part, p.settings.snap);
+      else p.components.push(part);
     });
     set({ selected: [part.id], tool: "select" });
   },
@@ -297,6 +299,20 @@ export const useStore = create<State>((set, get) => ({
       p.wires = next.wires;
       p.junctions = next.junctions;
     });
+  },
+  autoComplete: () => {
+    const { project, change, toast } = get();
+    const plan = autoCompleteCircuit(project);
+    if ("message" in plan) {
+      toast(plan.message);
+      return false;
+    }
+    change((p) => {
+      p.wires = plan.wires;
+      p.junctions = plan.junctions;
+    });
+    toast(`Connected ${plan.count} ${plan.count === 1 ? "wire" : "wires"}.`);
+    return true;
   },
   setView: (view) =>
     get().change((p) => {
